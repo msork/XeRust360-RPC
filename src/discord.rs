@@ -101,7 +101,8 @@ impl DiscordRpcClient {
             &mut *self.stream,
             FRAME_OPCODE,
             packet.to_string().as_bytes(),
-        )
+        )?;
+        await_command_response(&mut *self.stream, "SET_ACTIVITY", nonce)
     }
 
     pub fn clear_presence(&mut self) -> Result<(), DiscordError> {
@@ -116,8 +117,47 @@ impl DiscordRpcClient {
             &mut *self.stream,
             FRAME_OPCODE,
             packet.to_string().as_bytes(),
-        )
+        )?;
+        await_command_response(&mut *self.stream, "SET_ACTIVITY", nonce)
     }
+}
+
+fn await_command_response(
+    stream: &mut (impl Read + ?Sized),
+    expected_command: &str,
+    expected_nonce: u64,
+) -> Result<(), DiscordError> {
+    let (opcode, bytes) = read_packet(stream)?;
+    if opcode != FRAME_OPCODE {
+        return Err(DiscordError::Protocol(
+            "unexpected command response frame".to_owned(),
+        ));
+    }
+    let response: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| DiscordError::Protocol("invalid command response".to_owned()))?;
+    let expected_nonce = expected_nonce.to_string();
+    if response.get("nonce").and_then(Value::as_str) != Some(expected_nonce.as_str()) {
+        return Err(DiscordError::Protocol(
+            "Discord response nonce did not match request".to_owned(),
+        ));
+    }
+    if response.get("evt").and_then(Value::as_str) == Some("ERROR") {
+        let code = response
+            .get("data")
+            .and_then(|data| data.get("code"))
+            .and_then(Value::as_i64)
+            .map(|code| format!(" (code {code})"))
+            .unwrap_or_default();
+        return Err(DiscordError::Protocol(format!(
+            "Discord rejected {expected_command}{code}"
+        )));
+    }
+    if response.get("cmd").and_then(Value::as_str) != Some(expected_command) {
+        return Err(DiscordError::Protocol(
+            "Discord response command did not match request".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn activity_object(presence: &PresencePayload) -> Value {
@@ -304,7 +344,16 @@ mod tests {
     fn completes_handshake_and_sends_set_activity_frame() {
         let output = Arc::new(Mutex::new(Vec::new()));
         let stream = MemoryStream {
-            input: Cursor::new(frame(FRAME_OPCODE, br#"{"evt":"READY"}"#)),
+            input: Cursor::new(
+                [
+                    frame(FRAME_OPCODE, br#"{"evt":"READY"}"#),
+                    frame(
+                        FRAME_OPCODE,
+                        br#"{"cmd":"SET_ACTIVITY","data":null,"evt":null,"nonce":"1"}"#,
+                    ),
+                ]
+                .concat(),
+            ),
             output: Arc::clone(&output),
         };
         let mut client = DiscordRpcClient::handshake(Box::new(stream), "12345").unwrap();
@@ -335,7 +384,16 @@ mod tests {
     fn clear_sends_null_activity() {
         let output = Arc::new(Mutex::new(Vec::new()));
         let stream = MemoryStream {
-            input: Cursor::new(frame(FRAME_OPCODE, br#"{"evt":"READY"}"#)),
+            input: Cursor::new(
+                [
+                    frame(FRAME_OPCODE, br#"{"evt":"READY"}"#),
+                    frame(
+                        FRAME_OPCODE,
+                        br#"{"cmd":"SET_ACTIVITY","data":null,"evt":null,"nonce":"1"}"#,
+                    ),
+                ]
+                .concat(),
+            ),
             output: Arc::clone(&output),
         };
         let mut client = DiscordRpcClient::handshake(Box::new(stream), "12345").unwrap();
@@ -347,5 +405,26 @@ mod tests {
         let packet: Value = serde_json::from_slice(&packet).unwrap();
         assert_eq!(packet["cmd"], "SET_ACTIVITY");
         assert!(packet["args"]["activity"].is_null());
+    }
+
+    #[test]
+    fn rpc_command_rejects_mismatched_nonce_and_discord_error() {
+        let wrong_nonce = frame(
+            FRAME_OPCODE,
+            br#"{"cmd":"SET_ACTIVITY","data":null,"evt":null,"nonce":"2"}"#,
+        );
+        assert!(matches!(
+            await_command_response(&mut Cursor::new(wrong_nonce), "SET_ACTIVITY", 1),
+            Err(DiscordError::Protocol(message)) if message.contains("nonce")
+        ));
+
+        let rejected = frame(
+            FRAME_OPCODE,
+            br#"{"cmd":"SET_ACTIVITY","data":{"code":4006,"message":"Not authorized"},"evt":"ERROR","nonce":"1"}"#,
+        );
+        assert!(matches!(
+            await_command_response(&mut Cursor::new(rejected), "SET_ACTIVITY", 1),
+            Err(DiscordError::Protocol(message)) if message.contains("4006")
+        ));
     }
 }
