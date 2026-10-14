@@ -20,6 +20,7 @@
 8. Xbox artifact gate: before adding a PPC binary, record the compiler/ABI, imports/linking, packager, Peer Pressure load entrypoint, and teardown/lifecycle evidence. An OXDK or xsdk title XEX build or libXenon bare-metal build alone does not pass this gate. A successful XDK DLL build is artifact evidence only; loader compatibility requires a separately verified Peer Pressure load.
    - Treat `XamGetCurrentTitleId`/ordinal `0x1CF` as reverse-engineered only until a supported compatibility reference and hardware matrix exist; do not use it as verified telemetry.
 9. Cross-platform TCP CI: Linux, Windows, and macOS jobs each run the three named localhost tests with `XERUST_REQUIRE_LOOPBACK=1` and `--nocapture`. A green result means the tests actually bound and used loopback sockets, not that they returned early.
+10. Host companion simulation: compile `xbox-companion/` on Linux, Windows, and macOS. A loopback integration test must show one authenticated connection carrying multiple monotonically increasing heartbeat records and ending cleanly; a supplied candidate Title ID is the only populated telemetry field and is not described as console-observed.
 
 ## Local commands
 
@@ -38,6 +39,7 @@ cargo check --workspace
 - Start/stop a title and confirm timer resets, unknown-title fallback, disconnect handling, and reconnect.
 - Confirm Discord activity appears only while local Discord accepts RPC and clears on app shutdown.
 - Peer Pressure: official docs establish title-DLL configuration and unload-on-game-exit. Build a skeleton only with an available XDK toolchain; distinguish compile/package checks from actual Peer Pressure loading. No app-assisted deployment or hardware modification.
+- Host simulation: `cargo run --manifest-path xbox-companion/Cargo.toml -- --help` is host-only and does not prove Xenon ABI or title DLL compatibility.
 - Validate each non-title metric independently against a documented runtime API and console UI; unavailable API means unavailable telemetry.
 
 ## Compatibility matrix policy

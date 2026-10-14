@@ -46,6 +46,8 @@ The official Peer Pressure wiki documents sideload INI search precedence, title/
 
 The DLL attach callback must remain minimal. Do not start sockets, threads, or CRT-dependent work there until the Xbox 360 loader/CRT sequence and safe APIs are established for this build. The only intended initial runtime data is a heartbeat plus a Title ID obtained through a documented read-only API; the currently cited loader docs do not provide such a Title ID API. Never use a boot-resident service, DashLaunch plugin, kernel/XAM hook, memory patch/scan, or NAND/boot modification. A title transition is a disconnect and stale values are cleared.
 
+The current `xbox-companion/` executable is a host simulation, not an Xbox binary. Its optional Title ID is manually supplied test input and the UI/protocol must not represent it as read from a console. It shares the existing key/challenge/HMAC framing by depending on the desktop crate. It sends repeated telemetry on one authenticated connection until a finite count completes or the host process is stopped.
+
 ## Artwork
 
 Use a game-specific Discord image key for the curated title catalog when the selected Discord application contains that key. The setup guide lists the six initial keys and artwork requirement. Unknown or unconfigured titles use the generic Xbox 360 placeholder; do not scrape arbitrary images at runtime or claim an image belongs to an unknown title. The small image key is the project icon placeholder.

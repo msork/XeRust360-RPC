@@ -58,6 +58,14 @@ Every milestone is committed separately after its acceptance checks. Update thes
 - [ ] Verify the built DLL is actually accepted and unloaded by Peer Pressure on hardware; this app must not deploy it.
 - [ ] Identify documented safe runtime APIs for Title ID/heartbeat. Do not implement socket/thread work in DLL entrypoint before runtime initialization constraints are established.
 - [ ] Validate title launch/exit, unload, network loss, and supported hardware on a separately arranged test setup. No console deployment is performed by this application.
+
+## M8 — Host companion simulation
+
+- [ ] Add `xbox-companion/` host simulator using the existing authenticated companion protocol.
+- [ ] Send periodic heartbeat-only telemetry plus optional explicitly configured candidate Title ID on one session; label it as simulation input.
+- [ ] Add simulator build scripts/prerequisites and keep XDK proprietary files external.
+- [ ] Add a protocol integration test for multiple heartbeat frames on one connection and build the simulator in cross-platform CI.
+- Acceptance: host simulator compiles and uses protocol v1; no Xbox binary or claim of Peer Pressure compatibility is produced.
 - [ ] Measure which telemetry fields have documented and stable APIs; enable them only after verification.
 - Acceptance: hardware results and unverified cases are recorded; no game-wide support claim without evidence.
 
@@ -89,3 +97,4 @@ Every milestone is committed separately after its acceptance checks. Update thes
 | T-22 | Host denies localhost bind | Test prints an explicit `SKIPPED` reason locally; CI's required-loopback mode turns this into a failure. |
 | T-23 | CI matrix localhost integration | All three TCP scenarios execute successfully on Linux, Windows, and macOS; any bind/connect/test failure fails the job. |
 | T-24 | Title-DLL source build | A reproducible XDK build produces a structurally validated title DLL; this is build evidence only, not Peer Pressure loader/hardware compatibility. |
+| T-25 | Host companion simulation | Simulator authenticates once, sends monotonic heartbeat telemetry with only an optional supplied Title ID, and lets desktop freshness/disconnect behavior apply. |
