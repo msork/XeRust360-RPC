@@ -876,11 +876,14 @@ fn is_json_content_type(content_type: &str) -> bool {
 }
 
 fn metadata_response_error(response: &HttpResponse) -> Option<&'static str> {
-    if !response.transfer_ok {
-        return Some("network transfer failed");
+    if response.status == 0 {
+        return Some("no HTTP response (DNS/network failure)");
     }
     if response.status != 200 {
         return Some("HTTP status was not 200");
+    }
+    if !response.transfer_ok {
+        return Some("network transfer failed");
     }
     if response.redirects > MAX_REDIRECTS {
         return Some("redirect limit exceeded");
@@ -942,11 +945,14 @@ fn curl_image(url: &str) -> io::Result<HttpResponse> {
 }
 
 fn cover_response_error(response: &HttpResponse) -> Option<&'static str> {
-    if !response.transfer_ok {
-        return Some("curl transfer failed");
+    if response.status == 0 {
+        return Some("no HTTP response (DNS/network failure)");
     }
     if response.status != 200 {
         return Some("HTTP status was not 200");
+    }
+    if !response.transfer_ok {
+        return Some("curl transfer failed");
     }
     if response.redirects > MAX_REDIRECTS {
         return Some("redirect limit exceeded");
@@ -1193,6 +1199,23 @@ mod tests {
         assert_eq!(
             metadata_response_error(&bad_metadata),
             Some("final URL is not an allowed public HTTPS URL")
+        );
+
+        let mut http_error = bad_metadata;
+        http_error.status = 503;
+        http_error.transfer_ok = false;
+        assert_eq!(
+            metadata_response_error(&http_error),
+            Some("HTTP status was not 200")
+        );
+        assert_eq!(
+            cover_response_error(&http_error),
+            Some("HTTP status was not 200")
+        );
+        http_error.status = 0;
+        assert_eq!(
+            metadata_response_error(&http_error),
+            Some("no HTTP response (DNS/network failure)")
         );
     }
 
