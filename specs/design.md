@@ -21,7 +21,7 @@ The main window is a compact dashboard with a title bar, console connection sect
 - Details: resolved game name; unresolved values display `Title ID XXXXXXXX`.
 - State: join enabled components with ` // `, preserving the requested ordering. Examples: `Player // 5/50 achievements // 120 GS // 24000 GS // CPU 55°C / GPU 61°C`.
 - Timestamp: start time recorded when the observed Title ID changes.
-- Large image: per-title Discord asset key only when a valid mapping exists; otherwise generic Xbox 360 placeholder key.
+- Large image: exact Title ID provider's public HTTPS cover URL when available; otherwise generic Xbox 360 placeholder asset key. UI preview may show locally cached bytes while offline.
 - Small image: project icon key.
 
 Discord's official Rich Presence SDK documents text fields with a maximum of 128 characters. This implementation caps details/state at 128 UTF-8 bytes, which is stricter for multibyte text, and truncates only at character boundaries. The RPC adapter should preserve this limit and surface truncation in diagnostics.
@@ -50,4 +50,8 @@ The current `xbox-companion/` executable is a host simulation, not an Xbox binar
 
 ## Artwork
 
-Use a game-specific Discord image key for the curated title catalog when the selected Discord application contains that key. The setup guide lists the six initial keys and artwork requirement. Unknown or unconfigured titles use the generic Xbox 360 placeholder; do not scrape arbitrary images at runtime or claim an image belongs to an unknown title. The small image key is the project icon placeholder.
+Resolve game name and cover by exact Title ID through an ordered provider chain (x360db, then XboxUnity fallback). Prefer covers explicitly marked official. The live title name and cover are separate fields: if no exact metadata match exists, retain raw Title ID and use the generic Xbox 360 image. Do not guess identity from nearby IDs, text search, or image similarity. Discord official local IPC receives the provider's public HTTPS image URL in `assets.large_image`; no per-game app asset uploads are needed. The UI uses locally cached image bytes where available. Offline cache does not make a local file URL fetchable by Discord, so presence uses the generic uploaded Xbox 360 asset when no provider URL is usable. Small image remains the project icon asset placeholder.
+
+Provider adapters return metadata, validated remote image URL, provenance, official/community status, and optionally bounded cached image bytes. Cache metadata and images with an explicit cap and TTL, throttle each provider, use short timeouts, and negative-cache not-found results briefly to avoid request storms. Do not bulk scrape providers. Do not bundle provider artwork absent redistribution rights. x360db documents broad coverage (~6,000 Xbox 360 IDs) and a per-title boxart field, but no explicit cover-art license was found. XboxUnity's documented API exposes official/community flags and cover endpoints, but reliability/hotlinking and original artwork permissions are unverified. GameTDB is not integrated until Xbox 360 coverage is confirmed.
+
+The official Discord RPC-over-IPC documentation defines `SET_ACTIVITY` and activity assets, while Discord Rich Presence documentation allows external image URLs. This verifies protocol-level support for URLs, not the availability or fetching of a particular cover host by every Discord client. The provider URL must be HTTPS and publicly reachable; on invalid/missing provider data use the generic asset. Preserve existing local IPC-only Discord behavior.

@@ -69,6 +69,18 @@ Every milestone is committed separately after its acceptance checks. Update thes
 - [ ] Measure which telemetry fields have documented and stable APIs; enable them only after verification.
 - Acceptance: hardware results and unverified cases are recorded; no game-wide support claim without evidence.
 
+## M9 — Dynamic title metadata and artwork
+
+- [ ] Remove the six-title hardcoded name/artwork catalog while preserving exact-ID unknown behavior.
+- [ ] Add provider-neutral Xbox 360 metadata/artwork types and exact Title ID normalization.
+- [ ] Implement x360db metadata/boxart lookup and XboxUnity cover fallback with source labels and official-cover preference.
+- [ ] Add bounded timeouts, low request rates, cache size/TTL policy, negative caching, and offline cache resolution.
+- [ ] Pass validated provider HTTPS cover URLs through Discord local RPC `assets.large_image`; use generic uploaded Xbox 360 image when unavailable.
+- [ ] Update UI preview and diagnostics to distinguish live remote URL, cached local artwork, generic fallback, unknown title, and provider failure.
+- [ ] Add fixture/mock tests for real IDs, alternate/multi-disc IDs, missing artwork, provider failure/fallback, cache hit/expiry, offline resolution, throttling, and malformed URLs. Any live provider smoke test is opt-in, credentialless, and strictly limited to a single title.
+- [ ] Update CI, README, compatibility notes, and asset setup guidance. Do not bundle third-party cover files.
+- Acceptance: real documented Title IDs resolve through provider fixtures; no unknown ID is assigned a game; actual remote artwork is represented by an HTTPS URL; Discord rendering is described as protocol-supported but not live-verified without a client check.
+
 ## Milestone test cases
 
 | ID | Case | Expected result |
@@ -98,3 +110,9 @@ Every milestone is committed separately after its acceptance checks. Update thes
 | T-23 | CI matrix localhost integration | All three TCP scenarios execute successfully on Linux, Windows, and macOS; any bind/connect/test failure fails the job. |
 | T-24 | Title-DLL source build | A reproducible XDK build produces a structurally validated title DLL; this is build evidence only, not Peer Pressure loader/hardware compatibility. |
 | T-25 | Host companion simulation | Simulator authenticates once, sends monotonic heartbeat telemetry with only an optional supplied Title ID, and lets desktop freshness/disconnect behavior apply. |
+| T-26 | Known Title ID metadata | A provider fixture resolves `4D5307E6` to its Title ID-declared game and cover URL. |
+| T-27 | Unknown Title ID | No provider match yields raw unresolved Title ID and generic Xbox 360 cover, without inferred identity. |
+| T-28 | Provider fallback | Primary timeout/not-found uses the next provider; malformed or non-HTTPS image URLs are rejected. |
+| T-29 | Metadata/art cache | Repeated lookup is cached; expired entries refresh; offline lookup returns cached data or unavailable; cache remains bounded. |
+| T-30 | Discord external image URL | RPC `SET_ACTIVITY` includes the cover URL exactly when present and the generic asset when absent. This validates serialization, not real-client rendering. |
+| T-31 | Provider throttling and failure | Repeated lookup obeys per-provider limits; provider errors do not block UI or telemetry updates. |

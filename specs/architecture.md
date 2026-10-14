@@ -22,7 +22,8 @@ Application state / polling coordinator
 - `telemetry::mock`: deterministic sample and fault injection for development and UI preview.
 - `companion`: optional host-side listener and versioned message decoder for a title-scoped Peer Pressure DLL. The first implementation is protocol + mock only; it does not build, install, or deploy an Xbox DLL.
 - `presence`: pure formatter and Discord RPC client. IPC uses the official handshake and `SET_ACTIVITY` frame over Unix sockets or Windows named pipes. It accepts only a Discord Application ID and never handles user credentials.
-- `catalog`: offline Title ID to display name and Discord artwork key lookup for the initial curated set (Halo 3, Halo: Reach, Halo Wars, Halo 4, Grand Theft Auto V, and Skyrim). Unknown titles use raw IDs and neutral art. Asset keys require matching artwork uploads in the user's Discord application.
+- `catalog`: provider-independent exact Title ID normalization and metadata types.
+- `artwork`: provider chain, metadata/art cache, request throttling, and URL validation. Initial providers are x360db for broad metadata/boxart, then XboxUnity's documented community cover API as a fallback. Provider fetches are bounded and metadata is cached locally. Keep the returned remote URL for Discord and cached image bytes for local preview. Do not equate cache availability with Discord URL reachability.
 - `settings`: persistent non-secret preferences and credential-store adapter.
 - `ui`: native cross-platform window, status, preview, controls, diagnostics, tray lifecycle.
 
@@ -32,9 +33,12 @@ Application state / polling coordinator
 2. Select configured source: NOVA, companion, or mock. NOVA remains the compatible default live source; companion mode is opt-in.
 3. Connect/authenticate to NOVA and poll at a configurable interval, or accept bounded companion messages on a user-selected LAN listener.
 4. Decode each field independently into `Some(value)` or unavailable; retain last-known values only for transient display diagnostics, never re-label stale values as live.
-5. Update UI snapshot and format presence from available fields and user toggles.
-6. Connect to Discord IPC when the desktop client is present; publish or clear presence on state transitions.
-7. On title change, set a new elapsed-session start timestamp. On disconnect, clear presence after a short grace period and display disconnected status.
+5. Resolve metadata by exact observed Title ID through the artwork provider chain; consult the local cache first, then rate-limited providers. Cache metadata and bounded image bytes, retain provenance, and select the first valid remote HTTPS cover URL.
+6. Update UI snapshot and format presence from available fields and user toggles. Set `assets.large_image` to the remote cover URL only when one is available; otherwise use the generic Xbox 360 Discord asset. The UI preview may use cached bytes while offline.
+7. Connect to Discord IPC when the desktop client is present; publish or clear presence on state transitions.
+8. On title change, set a new elapsed-session start timestamp. On disconnect, clear presence after a short grace period and display disconnected status.
+
+The Xbox 360 artwork lookup order is exact Title ID only. x360db is the primary community metadata index (documented ~6,000 entries, alternate IDs and boxart field). XboxUnity is an optional runtime fallback with official/community cover flags. GameTDB is excluded because a verifiable Xbox 360 catalog was not established. Use HTTPS, explicit timeouts, low per-provider request rates, negative-result TTLs, cache size limits, and no background bulk scraping. Do not package third-party images: x360db's cover license is unclear, and XboxUnity's archive license excludes original artwork. Discord's official RPC-over-IPC `SET_ACTIVITY` supports activity assets and official Discord Rich Presence docs support external image URLs; URLs are passed through, not proxied by this app. URL rendering is supported by the documented contract, but actual third-party provider availability and client fetching remain environment-dependent.
 
 ## Platform and dependency choices
 

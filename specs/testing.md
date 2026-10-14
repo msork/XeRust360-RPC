@@ -21,6 +21,8 @@
    - Treat `XamGetCurrentTitleId`/ordinal `0x1CF` as reverse-engineered only until a supported compatibility reference and hardware matrix exist; do not use it as verified telemetry.
 9. Cross-platform TCP CI: Linux, Windows, and macOS jobs each run the three named localhost tests with `XERUST_REQUIRE_LOOPBACK=1` and `--nocapture`. A green result means the tests actually bound and used loopback sockets, not that they returned early.
 10. Host companion simulation: compile `xbox-companion/` on Linux, Windows, and macOS. A loopback integration test must show one authenticated connection carrying multiple monotonically increasing heartbeat records and ending cleanly; a supplied candidate Title ID is the only populated telemetry field and is not described as console-observed.
+11. Artwork providers: inject mock responses/time and verify exact IDs, known IDs (`4D5307E6`, `4D53085B`, `584108A9`), unknown IDs, alternate/multi-disc IDs, official-cover preference, source fallback, URL validation, request throttling, bounded response handling, metadata/image cache hits and expiry, offline cache, and provider errors. Keep live network tests opt-in and one-title only.
+12. Discord cover payload: assert local IPC `SET_ACTIVITY` serializes an HTTPS cover URL to `assets.large_image`, and the generic asset when unavailable. This is a protocol serialization check; actual Discord-client fetching/rendering must remain reported as unverified until a manual live-client check succeeds.
 
 ## Local commands
 
