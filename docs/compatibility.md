@@ -43,6 +43,8 @@ No memory scanning, arbitrary title-memory reads, patching, kernel hooks, or gue
 
 The official loader docs plus RB3Enhanced's XDK DLL project establish a credible build path in principle, but not enough to claim a built DLL works in Peer Pressure. A structurally validated XDK DLL build and actual Peer Pressure load test are separate gates. The XDK is not installed in this environment, and no DLL binary has been produced. DLL loading occurs before the game's CRT initialization; do not start companion sockets/threads or use CRT-dependent functions in `DllMain` without verified DLL-runtime sequencing. No documented read-only Title ID API has yet been established. Gamertag, achievements, gamerscore and temperatures remain unavailable.
 
+`XamGetCurrentTitleId` appears at XAM ordinal `0x1CF` in reverse-engineered export tables and public game-mod code, including examples that also perform game hooks. This establishes that the export is known in community reverse engineering; it does not establish a supported/public Xbox 360 API contract, compatibility across Peer Pressure's kernel versions, or safe use from this DLL lifecycle. XeRust360-RPC does not call it. The title ID field therefore remains unavailable from a real companion until a read-only API is documented and hardware-validated.
+
 Peer Pressure's public README says source is not published, excludes DashLaunch plugins, and warns force-loading arbitrary DLLs may destabilize the softmod. A persistent softmod is not persistent title DLL execution. No deployment or console modification is within this project.
 
 ## References
@@ -63,3 +65,5 @@ Peer Pressure's public README says source is not published, excludes DashLaunch 
 - [RB3Enhanced XDK DLL Makefile](https://github.com/RBEnhanced/RB3Enhanced/blob/master/Makefile)
 - [Xbox 360 XEX/DLL development guide](https://github.com/ClementDreptin/ModdingResources/blob/main/GettingStarted/getting-started.md)
 - [xenosworks/xsdk open-source title XEX toolchain](https://github.com/xenosworks/xsdk)
+- [Reverse-engineered XAM ordinal table](https://github.com/emoose/xbox-reversing/blob/master/x360_imports.py)
+- [Example game mod using that XAM export (not used as safety evidence)](https://github.com/rheard/The-Tesseract-on-Xbox-360-for-Black-Ops-2/blob/master/main.cpp)

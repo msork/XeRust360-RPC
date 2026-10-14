@@ -53,6 +53,7 @@ Every milestone is committed separately after its acceptance checks. Update thes
 
 - [x] Research official Peer Pressure sideload INI precedence, matching fields, load timing, title DLL type, and unload-on-game-exit behavior.
 - [x] Compare XDK, OXDK, libXenon, xenosworks/xsdk, and RB3Enhanced's real-world DLL build instructions/artifacts.
+- [x] Review the commonly referenced XAM current-title export; classify it as reverse-engineered and not yet a supported/validated telemetry API.
 - [ ] Build a harmless title-DLL skeleton using a compatible XDK installation; record the binary format, entrypoint, imports, and static verification results separately from loader compatibility. **Not runnable here: no XDK toolchain detected.**
 - [ ] Verify the built DLL is actually accepted and unloaded by Peer Pressure on hardware; this app must not deploy it.
 - [ ] Identify documented safe runtime APIs for Title ID/heartbeat. Do not implement socket/thread work in DLL entrypoint before runtime initialization constraints are established.
