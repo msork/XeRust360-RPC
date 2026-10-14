@@ -45,16 +45,18 @@ Every milestone is committed separately after its acceptance checks. Update thes
 - [x] Define versioned, bounded, authenticated read-only LAN protocol, freshness/lifecycle semantics, and metric availability contract in all applicable specs before implementation.
 - [x] Implement mock companion sender, desktop listener/source adapter, source selection, stale-session clearing, and diagnostics without Xbox binary or deployment support.
 - [x] Add protocol tests for valid fields, malformed/oversized/stale/unauthenticated/version-mismatch frames, lifecycle stop, and absence preservation.
-- [ ] Run socket integration tests on an unsandboxed runner; current sandbox denies loopback TCP binds, so those tests are skipped locally.
+- [ ] Emit an explicit SKIPPED reason when local policy denies loopback sockets, while requiring loopback in CI.
+- [ ] Run authenticated session/disconnect, malformed-message, and heartbeat-timeout TCP tests in Linux/Windows/macOS CI with localhost required.
 - Acceptance: desktop flow is testable entirely with mock peer; no companion message can issue console commands; existing NOVA behavior remains covered.
 
-## M7 — Hardware feasibility and compatibility validation (blocked on equipment/toolchain)
+## M7 — Peer Pressure loader/toolchain feasibility
 
-- [x] Research public toolchains: libXenon is bare-metal; OXDK documents Xenon ABI/XEX title-app builds, not Peer Pressure DLL sideloading.
-- [x] Confirm Peer Pressure publicly documents title DLL sideloading but no loader ABI, source, telemetry API, or explicit game DLL lifecycle contract.
-- [ ] Verify a supported Xenon game ABI/XEX-DLL toolchain and Peer Pressure loader contract without modifying console boot/NAND or using hooks. **Gate not met; do not create a DLL prototype.**
-- [ ] Prototype only after static review and mock protocol pass; no automatic deployment.
-- [ ] Validate a minimal read-only companion on real hardware, including game launch/exit, unload, network loss, and supported motherboard/boot method. No deployment or hardware operation is performed by this application.
+- [x] Research official Peer Pressure sideload INI precedence, matching fields, load timing, title DLL type, and unload-on-game-exit behavior.
+- [x] Compare XDK, OXDK, libXenon, and RB3Enhanced's real-world DLL build instructions/artifacts.
+- [ ] Build a harmless title-DLL skeleton using a compatible XDK installation; record the binary format, entrypoint, imports, and static verification results separately from loader compatibility.
+- [ ] Verify the built DLL is actually accepted and unloaded by Peer Pressure on hardware; this app must not deploy it.
+- [ ] Identify documented safe runtime APIs for Title ID/heartbeat. Do not implement socket/thread work in DLL entrypoint before runtime initialization constraints are established.
+- [ ] Validate title launch/exit, unload, network loss, and supported hardware on a separately arranged test setup. No console deployment is performed by this application.
 - [ ] Measure which telemetry fields have documented and stable APIs; enable them only after verification.
 - Acceptance: hardware results and unverified cases are recorded; no game-wide support claim without evidence.
 
@@ -83,3 +85,6 @@ Every milestone is committed separately after its acceptance checks. Update thes
 | T-19 | Companion title transition/exit | Treat process/title termination as disconnect, expire all values, clear presence, and start a new timer only on fresh authenticated data. |
 | T-20 | TCP peer closes after valid telemetry | Detect EOF as immediate session disconnect; do not wait for heartbeat timeout. |
 | T-21 | Authenticated peer sends malformed telemetry frame | Reject the frame, end the session, and preserve the last trusted snapshot until the coordinator clears the disconnected source. |
+| T-22 | Host denies localhost bind | Test prints an explicit `SKIPPED` reason locally; CI's required-loopback mode turns this into a failure. |
+| T-23 | CI matrix localhost integration | All three TCP scenarios execute successfully on Linux, Windows, and macOS; any bind/connect/test failure fails the job. |
+| T-24 | Title-DLL source build | A reproducible XDK build produces a structurally validated title DLL; this is build evidence only, not Peer Pressure loader/hardware compatibility. |

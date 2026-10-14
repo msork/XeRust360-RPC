@@ -15,9 +15,10 @@
 3. IPC protocol tests: in-memory framed Discord handshake, activity update payload, clear command, invalid application IDs, and invalid payload bounds. Manual checks verify real Unix socket/named pipe discovery against a running client.
 4. GUI smoke checks: mock mode, toggle behavior, diagnostics, and settings round trip; Linux tray actions; manual checks where native desktop automation is unavailable. Windows/macOS tray coverage is pending their tray implementation.
 5. Build/CI checks: formatting, tests, clippy, and compile jobs for Linux, Windows, and macOS.
-6. Companion protocol tests: local loopback mock peer; authenticated connection and telemetry, orderly TCP EOF, authenticated malformed/invalid frames, payload bounds, HMAC challenge/golden vectors, versioning, fixed serialization, monotonic sequence/freshness, idle heartbeat timeout, explicit process/session termination, and omitted metric preservation. EOF must be distinguished from a read timeout so intentional title-process exit clears immediately. No console required.
+6. Companion protocol tests: local loopback mock peer; authenticated connection and telemetry, orderly TCP EOF, authenticated malformed/invalid frames, payload bounds, HMAC challenge/golden vectors, versioning, fixed serialization, monotonic sequence/freshness, idle heartbeat timeout, explicit process/session termination, and omitted metric preservation. EOF must be distinguished from a read timeout so intentional title-process exit clears immediately. If loopback is denied locally, emit `SKIPPED: <reason>`; set `XERUST_REQUIRE_LOOPBACK=1` in CI so unavailable sockets fail instead of skip.
 7. Compatibility evidence: maintain [`../docs/compatibility.md`](../docs/compatibility.md) by boot method, motherboard class, kernel, dashboard/source, and DLL lifecycle. A cell is “verified” only with real hardware evidence; otherwise label it “not tested” or “not applicable”.
 8. Xbox artifact gate: before adding a PPC binary, record the compiler/ABI, imports/linking, packager, Peer Pressure load entrypoint, and teardown/lifecycle evidence. An OXDK title XEX build or libXenon bare-metal build alone does not pass this gate.
+9. Cross-platform TCP CI: Linux, Windows, and macOS jobs each run the three named localhost tests with `XERUST_REQUIRE_LOOPBACK=1` and `--nocapture`. A green result means the tests actually bound and used loopback sockets, not that they returned early.
 
 ## Local commands
 
@@ -35,7 +36,7 @@ cargo check --workspace
 - Confirm CPU/GPU readings and units against NOVA response.
 - Start/stop a title and confirm timer resets, unknown-title fallback, disconnect handling, and reconnect.
 - Confirm Discord activity appears only while local Discord accepts RPC and clears on app shutdown.
-- Peer Pressure: hardware validation is blocked by the missing public loader ABI and telemetry API. If evidence establishes these, verify configured game DLL load/unload per title, runtime-observed Title ID, and network loss without stale presence. Hardware work must not modify boot files through this application.
+- Peer Pressure: official docs establish title-DLL configuration and unload-on-game-exit. Build a skeleton only with an available XDK toolchain; distinguish compile/package checks from actual Peer Pressure loading. No app-assisted deployment or hardware modification.
 - Validate each non-title metric independently against a documented runtime API and console UI; unavailable API means unavailable telemetry.
 
 ## Compatibility matrix policy

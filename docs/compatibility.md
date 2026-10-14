@@ -31,11 +31,18 @@ No memory scanning, arbitrary title-memory reads, patching, kernel hooks, or gue
 
 ## Toolchain and lifecycle status
 
-Peer Pressure's public README describes DLL sideloading into games/apps and explicitly states its implementation source is not published. Its docs exclude DashLaunch plugins and warn force-loading arbitrary DLLs may destabilize the softmod. No public loader entrypoint, import ABI, initialization/teardown contract, telemetry API, or promise of execution across title transitions was found. A persistent softmod must not be confused with persistent execution of a title DLL.
+### Evidence-backed loader/toolchain matrix
 
-Free60 libXenon documents a PowerPC toolchain for bare-metal homebrew applications. It is not evidence of compatibility with a game-process DLL. OXDK documents Xenon Microsoft ABI and an XEX title application build/import-resolution path using XDK headers/libraries, but does not document Peer Pressure's DLL sideload contract. Neither alone passes the prototype gate. No PPC DLL/XEX artifact has been created or compiled.
+| Evidence path | Build target and entrypoint/imports | Peer Pressure fit | Evidence status |
+|---|---|---|---|
+| Peer Pressure official Softmod Features wiki | Looks for `<game xex directory>\\sideload.ini`, then `<game xex directory>\\<title id>.ini`, then `Hdd1:\\PeerPressure\\SideLoading\\<title id>.ini`. Matching config supports title ID, media ID, version. Loads after game XEX mapping and before game entrypoint/CRT initialization. Requires a title DLL (not system DLL); unloads at game exit; says not to hook outside game XEX. | Explicitly documented loader behavior and process boundary. Does not publish loader source, an import/ordinal table, a telemetry API, or an example companion DLL. | Documented upstream; not tested with this project. |
+| Microsoft Xbox 360 XDK (used by RB3Enhanced) | `cl.exe` and `link.exe` build a DLL with `_DllMainCRTStartup`; `imagexex.exe` wraps the result as Xbox DLL/XEX. RB3Enhanced links `xapilib`, `xboxkrnl`, `xnet`, and `xonline` in its project configuration. Its build guide supports Windows and Wine on Linux/macOS when the user supplies XDK. | Credible build path for title DLLs. RB3Enhanced is a real game mod, but uses its own loader/plugin paths; its build is not proof of Peer Pressure acceptance. | Documented by upstream mod/build scripts; XeRust360-RPC has not built it. XDK is absent here. |
+| OXDK (patched LLVM + supplied XDK libraries) | Custom Xenon ABI compiler, linker/import resolver and XEX2 wrapper; documented sample is an XEX title application. Public docs do not demonstrate a title-DLL output recipe/entrypoint. | Useful ABI/toolchain research; insufficient by itself for a Peer Pressure title DLL. | Documented XEX title flow; DLL compatibility unverified. |
+| Free60 libXenon | PowerPC bare-metal homebrew toolchain. | Not a game-process title DLL toolchain. | Documented target distinction. |
 
-The desktop protocol implementation is mock-tested. A future prototype requires evidence for the Xenon game ABI, compiler/linker/imports, package format, Peer Pressure load entrypoint, and teardown/title lifecycle. Only then may a harmless heartbeat and runtime-observed Title ID be considered. No safe title-wide API for achievements, profile, gamerscore, or temperature has been established; those values remain unavailable. Toolchain build, Peer Pressure loading, and hardware behavior remain unverified. Automatic deployment is out of scope.
+The official loader docs establish enough compatibility evidence to describe a credible toolchain hypothesis, but not enough to claim a built DLL works in Peer Pressure. A structurally validated XDK DLL build and actual Peer Pressure load test are separate gates. The XDK is not installed in this environment, and no DLL binary has been produced. DLL attach occurs before the game's CRT initialization; do not start companion sockets/threads or use CRT-dependent functions in `DllMain` without verified runtime sequencing. No documented read-only Title ID API has yet been established. Gamertag, achievements, gamerscore and temperatures remain unavailable.
+
+Peer Pressure's public README says source is not published, excludes DashLaunch plugins, and warns force-loading arbitrary DLLs may destabilize the softmod. A persistent softmod is not persistent title DLL execution. No deployment or console modification is within this project.
 
 ## References
 
@@ -50,3 +57,7 @@ The desktop protocol implementation is mock-tested. A future prototype requires 
 - [Peer Pressure installation lifecycle](https://github.com/grimdoomer/Xbox360PeerPressure/wiki/Installation)
 - [Peer Pressure telemetry API discussion](https://github.com/grimdoomer/Xbox360PeerPressure/issues/1)
 - [BadUpdate exploit details](https://github.com/grimdoomer/Xbox360BadUpdate/wiki/Exploit-Details)
+- [Peer Pressure official sideload configuration and lifecycle](https://github.com/grimdoomer/Xbox360PeerPressure/wiki/Softmod-Features)
+- [RB3Enhanced real-world Xbox DLL build guide](https://github.com/RBEnhanced/RB3Enhanced/blob/master/BUILDING.md)
+- [RB3Enhanced XDK DLL Makefile](https://github.com/RBEnhanced/RB3Enhanced/blob/master/Makefile)
+- [Xbox 360 XEX/DLL development guide](https://github.com/ClementDreptin/ModdingResources/blob/main/GettingStarted/getting-started.md)

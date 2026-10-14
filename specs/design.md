@@ -42,7 +42,9 @@ The wire protocol is versioned, length-prefixed, field-allowlisted, and authenti
 
 The UI labels every companion field as “reported” and may show unavailable for metrics the DLL cannot obtain. Title ID and elapsed time are not inferred from a sideload config alone; they require a fresh message from a running title. Profile, achievement, gamerscore, and CPU/GPU readings stay absent until their APIs are verified on hardware.
 
-No PPC DLL/XEX is generated until Xenon game ABI, Peer Pressure loader entrypoint, imports, packaging, and teardown/title lifecycle are established by documentation or verifiable source. libXenon bare-metal builds and OXDK XEX title builds alone do not establish Peer Pressure DLL compatibility. Never use a boot-resident service, DashLaunch plugin, kernel/XAM hook, memory patch/scan, or NAND/boot modification. A title transition is a disconnect and stale values are cleared.
+The official Peer Pressure wiki documents sideload INI search precedence, title/media/version matching, title-DLL loading before the game entrypoint/CRT initialization, and unload when the game exits. A buildable reference exists in RB3Enhanced: XDK compiler/linker, `_DllMainCRTStartup`, and `imagexex.exe` packaging. This is a credible title-DLL build path, but not proof our output loads in Peer Pressure. The app may carry only a source skeleton until an XDK build can be run and structurally inspected; never label build success as loader compatibility.
+
+The DLL attach callback must remain minimal. Do not start sockets, threads, or CRT-dependent work there until the Xbox 360 loader/CRT sequence and safe APIs are established for this build. The only intended initial runtime data is a heartbeat plus a Title ID obtained through a documented read-only API; the currently cited loader docs do not provide such a Title ID API. Never use a boot-resident service, DashLaunch plugin, kernel/XAM hook, memory patch/scan, or NAND/boot modification. A title transition is a disconnect and stale values are cleared.
 
 ## Artwork
 
