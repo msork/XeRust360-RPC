@@ -38,6 +38,23 @@ The metadata providers are community resources. x360db documents about 6,000 Xbo
 
 The current endpoint and Discord-client verification record is in [`docs/artwork-validation.md`](docs/artwork-validation.md). Fixture results are separated from live provider matches and visible Discord rendering.
 
+## Operator artwork and Discord checks
+
+These commands are opt-in and make public HTTPS requests. The provider receives only the Title ID; the app does not send NOVA credentials or profile data.
+
+```sh
+cargo run -- --artwork-diagnostics 4D5307E6
+```
+
+The diagnostic queries x360db and XboxUnity independently and prints exact-match status, HTTP status, redirects/final URL, MIME/signature checks, and cache results. It exits nonzero if no exact provider artwork passes. Try the known disc title IDs `4D5307E6` (Halo 3) and `4D53085B` (Halo: Reach), or `584111F7` (Minecraft XBLA); those IDs are inputs only, and output names/art URLs are shown only when a provider returns them. An unmatched/obscure ID is not guessed.
+
+```sh
+cargo run -- --discord-test 4D5307E6
+cargo run -- --discord-test 584111F7 --duration-seconds 90
+```
+
+Discord test mode requires live exact-ID metadata and a downloaded, validated public cover before publishing. Set the Discord Application ID in app settings and run Discord desktop in the same Linux session. The command reports the matching local IPC response, holds presence for 60 seconds by default (1–300 seconds configurable), then clears it. IPC acceptance is not proof that the image rendered. During the hold, inspect the Discord profile/activity card and check the visual result; record client version, provider, URL, and visible rendering separately. The CLI does not use OAuth/user tokens, Gateway, self-bots, or mocked data.
+
 Artwork lookup uses the system `curl` executable for bounded HTTPS requests (connect/total timeout and response-size caps). It is available by default on current Windows, macOS, and common Linux installations; if missing or blocked, title telemetry continues and a provider diagnostic is shown.
 
 Discord must be running as the current desktop user for local IPC presence to appear. The app shows its preview even when Discord is unavailable.

@@ -28,6 +28,11 @@ jobs:
         run: |
           cargo test --workspace artwork::tests::
           cargo test --workspace discord::tests::serializes_external_cover_url_in_local_rpc_activity
+      - name: Verify opt-in operator diagnostic modes
+        run: |
+          cargo test --bin xerust360-rpc cli_modes_are_opt_in_and_discord_interval_is_bounded
+          cargo test --workspace artwork::tests::metadata_and_cover_transport_checks_reject_bad_status_redirect_mime_and_signature
+          cargo test --workspace discord::tests::rpc_command_rejects_mismatched_nonce_and_discord_error
       - name: Run localhost companion TCP integration tests
         env:
           XERUST_REQUIRE_LOOPBACK: "1"

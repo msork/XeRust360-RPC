@@ -14,6 +14,8 @@ The command environment could not resolve either provider host. Each request ter
 
 The failure is an environment network/DNS blocker, not evidence that either provider is unavailable globally. No provider outage or successful artwork retrieval is claimed.
 
+The new opt-in CLI was also run with `cargo run --offline -- --artwork-diagnostics 4D5307E6`. It reported DNS/network failure independently for both providers, `HTTP status/MIME: unavailable` (no HTTP response), no resolved title, no cover URL, and no cache write; exit status was `1`. This confirms truthful failure reporting, not provider success. (The CLI now prints richer redirect/MIME fields when an HTTP response is available.)
+
 ## Discord client check
 
 No Discord desktop process or local `discord-ipc-*` socket was present. Therefore the project did not send a live `SET_ACTIVITY`, and there is no visual confirmation that Discord fetched or rendered external artwork. Official documentation supports external image URLs in Rich Presence asset fields, but actual client rendering remains blocked pending a running Discord desktop client and publicly reachable HTTPS artwork.
