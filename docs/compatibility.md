@@ -71,3 +71,15 @@ Peer Pressure's public README says source is not published, excludes DashLaunch 
 - [xenosworks/xsdk open-source title XEX toolchain](https://github.com/xenosworks/xsdk)
 - [Reverse-engineered XAM ordinal table](https://github.com/emoose/xbox-reversing/blob/master/x360_imports.py)
 - [Example game mod using that XAM export (not used as safety evidence)](https://github.com/rheard/The-Tesseract-on-Xbox-360-for-Black-Ops-2/blob/master/main.cpp)
+
+## Game metadata and artwork providers
+
+| Provider | Documented coverage/API | Licensing and hotlink status | Project status |
+|---|---|---|---|
+| x360db (`xenia-manager/x360db`) | Public `games.json` index documents about 6,000 entries, 8-character Title IDs, related/alternate IDs, titles, and boxart URLs. Its guide also documents per-title `info.json` and artwork paths. | Usage guide has no explicit cover-art redistribution license. URL hotlink terms are not stated. | Primary lookup adapter uses the documented index schema; no cover art is bundled. Live endpoint availability could not be checked here because outbound DNS resolution failed. |
+| XboxUnity | XboxUnity-Scraper's unofficial API reference documents `CoverInfo.php` by Title ID, an `Official` flag, and `Cover.php` by cover ID. | Scraper archive's CC BY-NC license excludes original XboxUnity data; original image rights remain with their owners. API uptime and hotlink permission are not established. | Runtime fallback adapter prefers the API's explicit official flag; it is not called verified/live until an external request succeeds. No data dump or cover files are bundled. |
+| GameTDB | Public examples cover Nintendo systems; no Xbox 360 Title ID index/API was verified. | Not assessed for Xbox 360 usage. | Not integrated. |
+
+Discord's official RPC-over-IPC documentation defines the local `SET_ACTIVITY` command and activity asset fields. Official Rich Presence SDK documentation allows a URL for large/small images. The client sends a valid public HTTPS image URL directly to Discord; the app does not proxy it. This verifies protocol support, not live Discord rendering from any specific provider. The client falls back to the uploaded generic Xbox 360 asset. Local art cache is used by the app preview and does not provide a remotely fetchable URL.
+
+Runtime artwork requests disclose the observed Title ID to these providers only. No NOVA credentials, gamertag, achievements, gamerscore, temperatures, or other telemetry are sent. Provider requests are HTTPS-only, size/time bounded, rate-limited, cached, and may fail without stopping telemetry. The system `curl` executable is required for network lookup; absence produces provider unavailability and uses cache or fallback.

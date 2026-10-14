@@ -38,6 +38,8 @@ XeRust360-RPC is a native desktop companion for Linux, Windows, and macOS. It re
 - Discord credentials/tokens are prohibited. Discord IPC uses the user's running desktop client.
 - NOVA credentials are optional and stored through OS keychain facilities where available; otherwise explain the fallback and avoid plaintext diagnostics/logs.
 - Telemetry stays on the local network except the local Discord IPC connection. No telemetry or credentials are sent to a project server.
+- When using online artwork lookup, the current Xbox 360 Title ID is sent to the configured public metadata providers. No NOVA credentials, profile, achievements, or other telemetry is sent. Provider lookup can be unavailable/blocked; cached local metadata and artwork remain usable.
+- Artwork fetching uses bounded HTTPS through the system curl utility; if it is missing or unavailable, title telemetry and Discord presence continue with generic artwork.
 - Discovery is limited to the local network and must not scan arbitrary public address ranges.
 
 ## Acceptance criteria
