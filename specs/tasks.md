@@ -50,9 +50,11 @@ Every milestone is committed separately after its acceptance checks. Update thes
 
 ## M7 — Hardware feasibility and compatibility validation (blocked on equipment/toolchain)
 
-- [ ] Verify a supported Xenon ABI/XEX-DLL toolchain and Peer Pressure sideload contract without modifying console boot/NAND or using hooks.
+- [x] Research public toolchains: libXenon is bare-metal; OXDK documents Xenon ABI/XEX title-app builds, not Peer Pressure DLL sideloading.
+- [x] Confirm Peer Pressure publicly documents title DLL sideloading but no loader ABI, source, telemetry API, or explicit game DLL lifecycle contract.
+- [ ] Verify a supported Xenon game ABI/XEX-DLL toolchain and Peer Pressure loader contract without modifying console boot/NAND or using hooks. **Gate not met; do not create a DLL prototype.**
 - [ ] Prototype only after static review and mock protocol pass; no automatic deployment.
-- [ ] Validate a minimal read-only companion on real hardware, including game launch/exit, unload, network loss, and supported motherboard/boot method.
+- [ ] Validate a minimal read-only companion on real hardware, including game launch/exit, unload, network loss, and supported motherboard/boot method. No deployment or hardware operation is performed by this application.
 - [ ] Measure which telemetry fields have documented and stable APIs; enable them only after verification.
 - Acceptance: hardware results and unverified cases are recorded; no game-wide support claim without evidence.
 
@@ -77,3 +79,5 @@ Every milestone is committed separately after its acceptance checks. Update thes
 | T-15 | Invalid, oversized, stale, unauthenticated, or wrong-version companion frame | Reject frame without changing current trusted telemetry or crashing. |
 | T-16 | Companion record omits achievements/profile/temperature | Those values remain absent; no fallback to guessed values. |
 | T-17 | NOVA selection while companion absent | Existing NOVA integration works unchanged. |
+| T-18 | Xbox artifact feasibility gate | Require evidence for PPC game ABI, imports, XEX/DLL packaging, Peer Pressure entrypoint, and teardown before any binary is added. |
+| T-19 | Companion title transition/exit | Treat process/title termination as disconnect, expire all values, clear presence, and start a new timer only on fresh authenticated data. |

@@ -42,6 +42,8 @@ The wire protocol is versioned, length-prefixed, field-allowlisted, and authenti
 
 The UI labels every companion field as “reported” and may show unavailable for metrics the DLL cannot obtain. Title ID and elapsed time are not inferred from a sideload config alone; they require a fresh message from a running title. Profile, achievement, gamerscore, and CPU/GPU readings stay absent until their APIs are verified on hardware.
 
+No PPC DLL/XEX is generated until Xenon game ABI, Peer Pressure loader entrypoint, imports, packaging, and teardown/title lifecycle are established by documentation or verifiable source. libXenon bare-metal builds and OXDK XEX title builds alone do not establish Peer Pressure DLL compatibility. Never use a boot-resident service, DashLaunch plugin, kernel/XAM hook, memory patch/scan, or NAND/boot modification. A title transition is a disconnect and stale values are cleared.
+
 ## Artwork
 
 Use a game-specific Discord image key for the curated title catalog when the selected Discord application contains that key. The setup guide lists the six initial keys and artwork requirement. Unknown or unconfigured titles use the generic Xbox 360 placeholder; do not scrape arbitrary images at runtime or claim an image belongs to an unknown title. The small image key is the project icon placeholder.
