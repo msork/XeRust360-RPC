@@ -34,6 +34,8 @@ XeRust360-RPC is a native desktop companion for Linux, Windows, and macOS. It re
 14. Never claim a metric the companion cannot observe from a stable, documented source. Title ID and title lifecycle are candidate observations; gamertag, achievements, gamerscore, and CPU/GPU temperatures remain unavailable unless a supported title/runtime API is demonstrated. Never inspect or patch arbitrary game memory.
 15. Include mock companion telemetry, protocol security/compatibility tests, a console compatibility matrix, and cross-platform desktop CI. Real console hardware validation remains explicitly marked unverified until performed.
 16. Discord presence remains exclusively official local RPC/SDK. No Discord user tokens, self-bots, Gateway automation, or credential extraction.
+17. Provide an opt-in Linux-friendly CLI artwork diagnostic for a supplied exact Title ID. It must test provider metadata and cover retrieval through the normal HTTPS/cache path, report each stage's actual result (including redirects/final URL, MIME, cache hit/write, and provider failure), and exit nonzero on failure. It must never substitute mock metadata or label DNS/network denial as a provider outage.
+18. Provide an opt-in Discord RPC test mode for an exact Title ID. It must resolve real provider artwork first, refuse to publish mock/generic-only data, use the configured Discord Application ID and local official IPC only, wait for and report the matching IPC response, hold presence for a bounded visible-check interval, then clear it. IPC acknowledgment and human-confirmed rendering are separate outcomes.
 
 ## Security and privacy
 
@@ -52,6 +54,7 @@ XeRust360-RPC is a native desktop companion for Linux, Windows, and macOS. It re
 - Presence fields remain within Discord RPC limits; oversized text is truncated at UTF-8 boundaries.
 - Game changes reset the elapsed timer; transient disconnects do not fabricate a game or telemetry values.
 - The app can be built and checked on Linux; CI declares Linux, Windows, and macOS jobs.
+- Both diagnostic modes are inert unless explicitly selected; automated tests cover argument handling, honest failure reporting, IPC response correlation, and cleanup. Cross-platform CI runs those tests on Linux, Windows, and macOS without public-network requests.
 
 ## Research basis and constraints
 

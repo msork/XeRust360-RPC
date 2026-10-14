@@ -91,6 +91,14 @@ Every milestone is committed separately after its acceptance checks. Update thes
 - [ ] Verify external HTTPS artwork with official local IPC and a running Discord desktop client; confirm visible image rendering. IPC payload acceptance alone is insufficient.
 - Acceptance: fixture/controlled cases pass, and live provider/client checks are separately evidenced or explicitly blocked. No identity, artwork availability, or rendering success is guessed.
 
+## M11 — Operator validation workflow
+
+- [ ] Add opt-in `--artwork-diagnostics <TITLE_ID>` CLI mode for live per-provider metadata and cover checks, with HTTP status, redirects/final HTTPS URL, MIME/signature, cache behavior, and honest nonzero errors.
+- [ ] Add opt-in `--discord-test <TITLE_ID> [--duration-seconds N]` using resolved live provider artwork and configured Application ID only; correlate the Discord RPC response with the request nonce and clear activity when done.
+- [ ] Add parser/transport/response/cancel-or-cleanup tests without default network or desktop dependencies; keep separate visible-render verification manual.
+- [ ] Add manual Linux workflow and checklist; run unit and compile checks in existing Linux/Windows/macOS CI matrix without external provider calls.
+- Acceptance: live modes never use or label mock data; failures are explicit; IPC acknowledgment is distinct from visually rendered artwork; local IPC remains tokenless and no unsafe Xbox operations are added.
+
 ## Milestone test cases
 
 | ID | Case | Expected result |

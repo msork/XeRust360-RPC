@@ -28,6 +28,9 @@
 15. Live provider smoke checks (opt-in, one ID per request): capture HTTP status, redirect count/final HTTPS URL, content type, bounded body size, exact-ID metadata match, image signature, cache repeat behavior, throttling, and outage behavior for x360db and XboxUnity. DNS/network denial is recorded as blocked, never passed or interpreted as provider failure.
 16. Discord image rendering: serialize external HTTPS URL into official local RPC `SET_ACTIVITY`, publish with a running desktop client, and visually confirm the Rich Presence card renders the image. Record client/platform, URL, and visible result. IPC acknowledgment alone is not a pass; no client means blocked.
 17. Coverage classes: test a disc title, XBLA title, obscure title, and Original Xbox ID only where the provider explicitly identifies platform. Record whether Title ID/media ID distinguishes multi-disc variants; never infer the disc from Title ID alone.
+18. CLI artwork diagnostics: verify `--artwork-diagnostics` is opt-in, exact-ID-only, contains no credentials, shows per-provider result, HTTP status/redirect/final URL/MIME/signature/cache outcome, and returns nonzero for DNS/HTTP/provider/cache errors. Do not call external providers in default tests or CI.
+19. CLI Discord test: mock the IPC handshake and matching `SET_ACTIVITY` response, verify mismatched nonce/error response fails, external URL is required, interval is bounded, presence clears on normal exit/error, and no mock/catalog fallback is published. A fake IPC server proves protocol handling only, never visual rendering.
+20. Cross-platform validation CI: run CLI parsing, artwork diagnostic formatter/provider fixture, and Discord RPC response tests on Linux, Windows, and macOS; do not perform live provider or Discord calls in CI.
 
 ## Local commands
 
@@ -45,6 +48,8 @@ cargo check --workspace
 - Confirm CPU/GPU readings and units against NOVA response.
 - Start/stop a title and confirm timer resets, unknown-title fallback, disconnect handling, and reconnect.
 - Confirm Discord activity appears only while local Discord accepts RPC and clears on app shutdown.
+- Linux live-artwork checklist: start Discord desktop in the same logged-in session; run `cargo run -- --artwork-diagnostics 4D5307E6`; record provider results and verify public image response status, final HTTPS URL, MIME/signature, and cache write. Repeat once and verify cache reuse/offline resolution. Repeat with known XBLA ID `584111F7` and an exact obscure/multi-disc ID only when selected from provider-returned records.
+- Discord external-image checklist: while Discord desktop is running, set a valid app Application ID in app settings; run `cargo run -- --discord-test 4D5307E6`; confirm matching IPC acknowledgment; while the 60-second activity window remains active, inspect the profile/activity card on desktop and verify the actual game cover displays (not generic icon/error). Record client version, Linux desktop/session, Title ID, resolved provider, URL, and whether the image visibly rendered. Wait for/confirm clear. Do not report IPC acknowledgment as image success.
 - Peer Pressure: official docs establish title-DLL configuration and unload-on-game-exit. Build a skeleton only with an available XDK toolchain; distinguish compile/package checks from actual Peer Pressure loading. No app-assisted deployment or hardware modification.
 - Host simulation: `cargo run --manifest-path xbox-companion/Cargo.toml -- --help` is host-only and does not prove Xenon ABI or title DLL compatibility.
 - Validate each non-title metric independently against a documented runtime API and console UI; unavailable API means unavailable telemetry.
