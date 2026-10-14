@@ -1,11 +1,12 @@
 use std::{
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     sync::mpsc::{self, Receiver, Sender, TryRecvError},
     thread,
     time::{Duration, Instant},
 };
 
 use crate::{
+    companion::{CompanionEvent, CompanionServer, SharedKey},
     discord::{DiscordError, DiscordRpcClient},
     domain::{GameSession, StateToggles, TelemetrySnapshot},
     mock::sample_snapshot,
@@ -19,6 +20,7 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkerSettings {
     pub mock_mode: bool,
+    pub companion_mode: bool,
     pub auto_reconnect: bool,
     pub poll_interval: Duration,
     pub discord_application_id: String,
@@ -30,6 +32,7 @@ impl Default for WorkerSettings {
     fn default() -> Self {
         Self {
             mock_mode: true,
+            companion_mode: false,
             auto_reconnect: true,
             poll_interval: Duration::from_secs(10),
             discord_application_id: String::new(),
@@ -47,6 +50,12 @@ pub enum WorkerCommand {
         port: u16,
         credentials: Option<NovaCredentials>,
     },
+    StartCompanion {
+        address: SocketAddr,
+        key: SharedKey,
+        heartbeat_timeout: Duration,
+    },
+    StopCompanion,
     Disconnect,
     Discover {
         port: u16,
@@ -112,6 +121,7 @@ struct State {
     has_published: bool,
     failures: u32,
     next_poll: Instant,
+    companion_server: Option<CompanionServer>,
 }
 
 fn run_worker(
@@ -132,6 +142,7 @@ fn run_worker(
         has_published: false,
         failures: 0,
         next_poll: Instant::now(),
+        companion_server: None,
     };
     loop {
         let timeout = state
@@ -147,6 +158,7 @@ fn run_worker(
         if Instant::now() >= state.next_poll {
             poll_once(&mut state, &events);
         }
+        process_companion_events(&mut state, &events);
     }
     if let Some(discord) = state.discord.as_mut() {
         let _ = discord.clear_presence();
@@ -166,6 +178,11 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
                 };
             }
             state.settings = settings;
+            if !state.settings.companion_mode && state.companion_server.is_some() {
+                state.companion_server = None;
+                state.clear_presence();
+                state.session.observe_title(None, Instant::now());
+            }
             if state.settings.mock_mode {
                 state.connection = "Mock preview".to_owned();
                 state.diagnostic = "Synthetic values are labeled as mock data".to_owned();
@@ -180,6 +197,8 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
             port,
             credentials,
         } => {
+            state.companion_server = None;
+            state.settings.companion_mode = false;
             let config = NovaConfig {
                 host,
                 port,
@@ -193,9 +212,49 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
             state.failures = 0;
             state.next_poll = Instant::now();
         }
+        WorkerCommand::StartCompanion {
+            address,
+            key,
+            heartbeat_timeout,
+        } => {
+            state.client = None;
+            state.config = None;
+            state.companion_server = None;
+            state.clear_presence();
+            state.session.observe_title(None, Instant::now());
+            state.settings.mock_mode = false;
+            state.settings.companion_mode = true;
+            match CompanionServer::bind(address, key, heartbeat_timeout) {
+                Ok(server) => {
+                    state.connection =
+                        format!("Listening for companion on {}", server.local_addr());
+                    state.diagnostic =
+                        "Waiting for a configured title DLL; no console deployment is performed"
+                            .to_owned();
+                    state.companion_server = Some(server);
+                }
+                Err(error) => {
+                    state.connection = "Companion listener unavailable".to_owned();
+                    state.diagnostic = error.to_string();
+                    state.settings.companion_mode = false;
+                }
+            }
+            state.next_poll = Instant::now() + Duration::from_millis(250);
+        }
+        WorkerCommand::StopCompanion => {
+            state.companion_server = None;
+            state.settings.companion_mode = false;
+            state.clear_presence();
+            state.session.observe_title(None, Instant::now());
+            state.connection = "Companion listener stopped".to_owned();
+            state.diagnostic.clear();
+            state.next_poll = Instant::now() + Duration::from_secs(60 * 60);
+        }
         WorkerCommand::Disconnect => {
             state.client = None;
             state.config = None;
+            state.companion_server = None;
+            state.settings.companion_mode = false;
             state.connection = "Disconnected".to_owned();
             state.diagnostic.clear();
             state.clear_presence();
@@ -218,6 +277,10 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
 }
 
 fn poll_once(state: &mut State, events: &Sender<WorkerEvent>) {
+    if state.settings.companion_mode {
+        state.next_poll = Instant::now() + Duration::from_millis(250);
+        return;
+    }
     if state.settings.mock_mode {
         let snapshot = sample_snapshot();
         update_and_publish(state, snapshot.clone());
@@ -277,6 +340,64 @@ fn poll_once(state: &mut State, events: &Sender<WorkerEvent>) {
             } else {
                 Instant::now() + Duration::from_secs(60 * 60)
             };
+        }
+    }
+}
+
+fn process_companion_events(state: &mut State, events: &Sender<WorkerEvent>) {
+    let queued: Vec<_> = state
+        .companion_server
+        .as_ref()
+        .into_iter()
+        .flat_map(|server| std::iter::from_fn(|| server.try_event().ok()))
+        .collect();
+    for event in queued {
+        match event {
+            CompanionEvent::Connected => {
+                state.clear_presence();
+                state.session.observe_title(None, Instant::now());
+                state.connection = "Peer Pressure title companion connected".to_owned();
+                state.diagnostic = "Receiving authenticated, read-only telemetry".to_owned();
+                send_status(state, events);
+            }
+            CompanionEvent::Snapshot { snapshot, .. } => {
+                let mut snapshot = snapshot;
+                if snapshot.game.name.is_none() {
+                    snapshot.game.name = snapshot
+                        .game
+                        .title_id
+                        .as_deref()
+                        .and_then(crate::catalog::resolve_title_name)
+                        .map(str::to_owned);
+                }
+                update_and_publish(state, snapshot.clone());
+                state.connection = "Peer Pressure title companion active".to_owned();
+                state.diagnostic = "Values are reported by the current title DLL; unsupported fields remain unavailable".to_owned();
+                let _ = events.send(WorkerEvent::Snapshot {
+                    elapsed: state.session.elapsed(Instant::now()),
+                    snapshot,
+                    connection: state.connection.clone(),
+                    discord: state.discord_status.clone(),
+                    diagnostic: state.diagnostic.clone(),
+                });
+            }
+            CompanionEvent::Disconnected(reason) => {
+                state.clear_presence();
+                state.session.observe_title(None, Instant::now());
+                state.connection = "Peer Pressure title companion unavailable".to_owned();
+                state.diagnostic = reason.to_owned();
+                let _ = events.send(WorkerEvent::Snapshot {
+                    snapshot: TelemetrySnapshot::default(),
+                    elapsed: None,
+                    connection: state.connection.clone(),
+                    discord: state.discord_status.clone(),
+                    diagnostic: state.diagnostic.clone(),
+                });
+            }
+            CompanionEvent::Rejected(reason) => {
+                state.diagnostic = reason.to_owned();
+                send_status(state, events);
+            }
         }
     }
 }

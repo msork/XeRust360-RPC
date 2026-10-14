@@ -107,6 +107,7 @@ impl DesktopApp {
         let settings = settings::load();
         let worker_settings = WorkerSettings {
             mock_mode: settings.mock_mode,
+            companion_mode: false,
             auto_reconnect: settings.auto_reconnect,
             poll_interval: Duration::from_secs(settings.poll_interval_seconds.clamp(1, 120)),
             discord_application_id: settings.discord_application_id.clone(),
@@ -151,6 +152,7 @@ impl DesktopApp {
     fn worker_settings(&self) -> WorkerSettings {
         WorkerSettings {
             mock_mode: self.settings.mock_mode,
+            companion_mode: false,
             auto_reconnect: self.settings.auto_reconnect,
             poll_interval: Duration::from_secs(self.settings.poll_interval_seconds.clamp(1, 120)),
             discord_application_id: self.active_application_id.clone(),
