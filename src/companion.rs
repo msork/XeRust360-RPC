@@ -33,6 +33,24 @@ impl SharedKey {
     pub fn new(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
+
+    pub fn generate() -> Result<Self, ProtocolError> {
+        let mut bytes = [0; 32];
+        SystemRandom::new()
+            .fill(&mut bytes)
+            .map_err(|_| ProtocolError::RandomUnavailable)?;
+        Ok(Self(bytes))
+    }
+
+    pub fn from_hex(text: &str) -> Result<Self, ProtocolError> {
+        parse_hex_32(text)
+            .map(Self)
+            .ok_or(ProtocolError::InvalidTelemetry("shared key"))
+    }
+
+    pub fn to_hex(&self) -> String {
+        hex(&self.0)
+    }
 }
 
 impl fmt::Debug for SharedKey {

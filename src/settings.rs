@@ -13,6 +13,10 @@ pub struct AppSettings {
     pub poll_interval_seconds: u64,
     pub auto_reconnect: bool,
     pub mock_mode: bool,
+    pub companion_mode: bool,
+    pub companion_bind_address: String,
+    pub companion_port: u16,
+    pub companion_heartbeat_seconds: u64,
     pub discord_application_id: String,
     pub toggles: StateToggles,
 }
@@ -26,6 +30,10 @@ impl Default for AppSettings {
             poll_interval_seconds: 10,
             auto_reconnect: true,
             mock_mode: true,
+            companion_mode: false,
+            companion_bind_address: String::new(),
+            companion_port: 17999,
+            companion_heartbeat_seconds: 5,
             discord_application_id: String::new(),
             toggles: StateToggles::default(),
         }

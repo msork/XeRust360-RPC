@@ -178,6 +178,14 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
                 };
             }
             state.settings = settings;
+            if state.settings.mock_mode {
+                state.client = None;
+                state.config = None;
+            }
+            if state.settings.companion_mode {
+                state.client = None;
+                state.config = None;
+            }
             if !state.settings.companion_mode && state.companion_server.is_some() {
                 state.companion_server = None;
                 state.clear_presence();
@@ -248,6 +256,13 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
             state.session.observe_title(None, Instant::now());
             state.connection = "Companion listener stopped".to_owned();
             state.diagnostic.clear();
+            let _ = events.send(WorkerEvent::Snapshot {
+                snapshot: TelemetrySnapshot::default(),
+                elapsed: None,
+                connection: state.connection.clone(),
+                discord: state.discord_status.clone(),
+                diagnostic: state.diagnostic.clone(),
+            });
             state.next_poll = Instant::now() + Duration::from_secs(60 * 60);
         }
         WorkerCommand::Disconnect => {
@@ -259,6 +274,13 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
             state.diagnostic.clear();
             state.clear_presence();
             state.session.observe_title(None, Instant::now());
+            let _ = events.send(WorkerEvent::Snapshot {
+                snapshot: TelemetrySnapshot::default(),
+                elapsed: None,
+                connection: state.connection.clone(),
+                discord: state.discord_status.clone(),
+                diagnostic: state.diagnostic.clone(),
+            });
             state.next_poll = Instant::now() + Duration::from_secs(60 * 60);
         }
         WorkerCommand::Discover { port } => {

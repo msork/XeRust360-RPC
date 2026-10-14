@@ -1,5 +1,5 @@
 use std::{
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::mpsc::{self, Receiver, Sender},
     time::{Duration, Instant},
@@ -8,6 +8,7 @@ use std::{
 use eframe::egui;
 
 use crate::{
+    companion::SharedKey,
     credentials,
     domain::TelemetrySnapshot,
     nova::NovaCredentials,
@@ -92,6 +93,8 @@ pub struct DesktopApp {
     diagnostics: String,
     username: String,
     password: String,
+    companion_shared_key: String,
+    show_companion_key: bool,
     active_application_id: String,
     presence_paused: bool,
     discovery_results: Vec<IpAddr>,
@@ -105,9 +108,13 @@ impl DesktopApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         let settings = settings::load();
+        let companion_shared_key = credentials::retrieve("peerpressure-companion-v1", "shared-key")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let worker_settings = WorkerSettings {
             mock_mode: settings.mock_mode,
-            companion_mode: false,
+            companion_mode: settings.companion_mode,
             auto_reconnect: settings.auto_reconnect,
             poll_interval: Duration::from_secs(settings.poll_interval_seconds.clamp(1, 120)),
             discord_application_id: settings.discord_application_id.clone(),
@@ -123,7 +130,12 @@ impl DesktopApp {
         };
         #[cfg(not(target_os = "linux"))]
         let _ = tray_tx;
-        let should_auto_connect = !settings.mock_mode && !settings.nova_host.trim().is_empty();
+        let should_auto_connect = !settings.mock_mode
+            && !settings.companion_mode
+            && !settings.nova_host.trim().is_empty();
+        let should_start_companion = settings.companion_mode
+            && !settings.companion_bind_address.trim().is_empty()
+            && !companion_shared_key.is_empty();
         let mut app = Self {
             username: settings.nova_username.clone(),
             active_application_id: settings.discord_application_id.clone(),
@@ -136,6 +148,8 @@ impl DesktopApp {
             discord_status: "Checking Discord".to_owned(),
             diagnostics: "Mock preview is available on first launch".to_owned(),
             password: String::new(),
+            companion_shared_key,
+            show_companion_key: false,
             presence_paused: false,
             discovery_results: Vec::new(),
             save_error: None,
@@ -145,6 +159,11 @@ impl DesktopApp {
         };
         if should_auto_connect {
             app.connect();
+        } else if should_start_companion {
+            app.start_companion();
+        } else if app.settings.companion_mode {
+            app.diagnostics =
+                "Select a private LAN address and companion key to start the listener".to_owned();
         }
         app
     }
@@ -152,7 +171,7 @@ impl DesktopApp {
     fn worker_settings(&self) -> WorkerSettings {
         WorkerSettings {
             mock_mode: self.settings.mock_mode,
-            companion_mode: false,
+            companion_mode: self.settings.companion_mode,
             auto_reconnect: self.settings.auto_reconnect,
             poll_interval: Duration::from_secs(self.settings.poll_interval_seconds.clamp(1, 120)),
             discord_application_id: self.active_application_id.clone(),
@@ -212,6 +231,7 @@ impl DesktopApp {
         self.settings.nova_host = host.to_string();
         self.settings.nova_username = username;
         self.settings.mock_mode = false;
+        self.settings.companion_mode = false;
         self.save();
         self.worker
             .send(WorkerCommand::UpdateSettings(self.worker_settings()));
@@ -219,6 +239,45 @@ impl DesktopApp {
             host,
             port: self.settings.nova_port,
             credentials,
+        });
+    }
+
+    fn start_companion(&mut self) {
+        let bind_ip = match IpAddr::from_str(self.settings.companion_bind_address.trim()) {
+            Ok(address) => address,
+            Err(_) => {
+                self.diagnostics =
+                    "Enter the desktop's private LAN address to listen on".to_owned();
+                return;
+            }
+        };
+        let key = match SharedKey::from_hex(self.companion_shared_key.trim()) {
+            Ok(key) => key,
+            Err(error) => {
+                self.diagnostics = error.to_string();
+                return;
+            }
+        };
+        if let Err(error) = credentials::store(
+            "peerpressure-companion-v1",
+            "shared-key",
+            self.companion_shared_key.trim(),
+        ) {
+            self.diagnostics = format!(
+                "OS credential store unavailable ({error}); using the key for this session only"
+            );
+        }
+        self.settings.mock_mode = false;
+        self.settings.companion_mode = true;
+        self.save();
+        self.worker
+            .send(WorkerCommand::UpdateSettings(self.worker_settings()));
+        self.worker.send(WorkerCommand::StartCompanion {
+            address: SocketAddr::new(bind_ip, self.settings.companion_port),
+            key,
+            heartbeat_timeout: Duration::from_secs(
+                self.settings.companion_heartbeat_seconds.clamp(1, 60),
+            ),
         });
     }
 
@@ -279,81 +338,181 @@ impl DesktopApp {
         }
     }
 
-    fn render_connection(&mut self, ui: &mut egui::Ui) -> bool {
+    fn render_connection(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> bool {
         let mut changed = false;
-        ui.heading("Console connection");
+        ui.heading("Telemetry source");
         ui.horizontal(|ui| {
-            ui.label("IP address");
-            changed |= ui
-                .add(
-                    egui::TextEdit::singleline(&mut self.settings.nova_host)
-                        .hint_text("192.168.1.50")
-                        .desired_width(170.0),
-                )
-                .changed();
-            ui.label("Port");
-            changed |= ui
-                .add(egui::DragValue::new(&mut self.settings.nova_port).range(1..=65535))
-                .changed();
-            if ui.button("Discover").clicked() {
-                self.worker.send(WorkerCommand::Discover {
-                    port: self.settings.nova_port,
-                });
-                self.diagnostics = "Searching private local networks for NOVA…".to_owned();
-            }
-            if ui.button("Connect").clicked() {
-                self.connect();
-            }
-            if ui.button("Disconnect").clicked() {
-                self.worker.send(WorkerCommand::Disconnect);
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("NOVA username");
-            changed |= ui
-                .add(egui::TextEdit::singleline(&mut self.username).desired_width(150.0))
-                .changed();
-            ui.label("Password");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.password)
-                    .password(true)
-                    .desired_width(150.0),
-            );
-            if ui.button("Forget saved password").clicked()
-                && let Ok(host) = IpAddr::from_str(self.settings.nova_host.trim())
+            if ui
+                .selectable_label(self.settings.mock_mode, "Mock")
+                .clicked()
             {
-                match credentials::delete(&host.to_string(), self.username.trim()) {
-                    Ok(()) => self.diagnostics = "Saved NOVA password removed".to_owned(),
-                    Err(error) => self.diagnostics = format!("Credential store: {error}"),
-                }
+                self.settings.mock_mode = true;
+                self.settings.companion_mode = false;
+                self.worker.send(WorkerCommand::Disconnect);
+                changed = true;
+            }
+            if ui
+                .selectable_label(
+                    !self.settings.mock_mode && !self.settings.companion_mode,
+                    "Aurora NOVA",
+                )
+                .clicked()
+            {
+                self.settings.mock_mode = false;
+                self.settings.companion_mode = false;
+                self.worker.send(WorkerCommand::Disconnect);
+                changed = true;
+            }
+            if ui
+                .selectable_label(self.settings.companion_mode, "Peer Pressure companion")
+                .clicked()
+            {
+                self.settings.mock_mode = false;
+                self.settings.companion_mode = true;
+                self.worker.send(WorkerCommand::Disconnect);
+                changed = true;
             }
         });
-        ui.horizontal(|ui| {
-            changed |= ui
-                .checkbox(&mut self.settings.auto_reconnect, "Auto-reconnect")
-                .changed();
-            ui.label("Poll interval");
-            changed |= ui
-                .add(
-                    egui::DragValue::new(&mut self.settings.poll_interval_seconds)
-                        .range(1..=120)
-                        .suffix(" s"),
-                )
-                .changed();
-            changed |= ui
-                .checkbox(&mut self.settings.mock_mode, "Mock preview")
-                .changed();
-        });
-        if !self.discovery_results.is_empty() {
+        if self.settings.companion_mode {
             ui.horizontal(|ui| {
-                ui.label("Discovered:");
-                for ip in &self.discovery_results {
-                    if ui.button(ip.to_string()).clicked() {
-                        self.settings.nova_host = ip.to_string();
-                        changed = true;
+                ui.label("Desktop LAN address");
+                changed |= ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.settings.companion_bind_address)
+                            .hint_text("desktop private IPv4 address")
+                            .desired_width(190.0),
+                    )
+                    .changed();
+                ui.label("Port");
+                changed |= ui
+                    .add(egui::DragValue::new(&mut self.settings.companion_port).range(1..=65535))
+                    .changed();
+                ui.label("Expiry");
+                changed |= ui
+                    .add(
+                        egui::DragValue::new(&mut self.settings.companion_heartbeat_seconds)
+                            .range(1..=60)
+                            .suffix(" s"),
+                    )
+                    .changed();
+            });
+            ui.horizontal(|ui| {
+                ui.label("Companion key");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.companion_shared_key)
+                        .password(!self.show_companion_key)
+                        .hint_text("64 hexadecimal characters")
+                        .desired_width(225.0),
+                );
+                if ui.button("Generate").clicked() {
+                    match SharedKey::generate() {
+                        Ok(key) => self.companion_shared_key = key.to_hex(),
+                        Err(error) => self.diagnostics = error.to_string(),
+                    }
+                }
+                if ui.button("Save key").clicked() {
+                    match SharedKey::from_hex(self.companion_shared_key.trim()) {
+                        Ok(_) => match credentials::store(
+                            "peerpressure-companion-v1",
+                            "shared-key",
+                            self.companion_shared_key.trim(),
+                        ) {
+                            Ok(()) => {
+                                self.diagnostics =
+                                    "Companion key saved in OS credential store".to_owned()
+                            }
+                            Err(error) => self.diagnostics = format!("Credential store: {error}"),
+                        },
+                        Err(error) => self.diagnostics = error.to_string(),
+                    }
+                }
+                changed |= ui.checkbox(&mut self.show_companion_key, "Show").changed();
+                if ui.button("Copy for DLL config").clicked() {
+                    ctx.copy_text(self.companion_shared_key.clone());
+                    self.diagnostics = "Companion key copied to clipboard".to_owned();
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Start listener").clicked() {
+                    self.start_companion();
+                }
+                if ui.button("Stop listener").clicked() {
+                    self.worker.send(WorkerCommand::StopCompanion);
+                }
+                ui.small("Configure a title DLL separately; this app never installs or deploys Xbox files.");
+            });
+        } else {
+            ui.heading("Aurora NOVA connection");
+            ui.horizontal(|ui| {
+                ui.label("IP address");
+                changed |= ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.settings.nova_host)
+                            .hint_text("192.168.1.50")
+                            .desired_width(170.0),
+                    )
+                    .changed();
+                ui.label("Port");
+                changed |= ui
+                    .add(egui::DragValue::new(&mut self.settings.nova_port).range(1..=65535))
+                    .changed();
+                if ui.button("Discover").clicked() {
+                    self.worker.send(WorkerCommand::Discover {
+                        port: self.settings.nova_port,
+                    });
+                    self.diagnostics = "Searching private local networks for NOVA…".to_owned();
+                }
+                if ui.button("Connect").clicked() {
+                    self.connect();
+                }
+                if ui.button("Disconnect").clicked() {
+                    self.worker.send(WorkerCommand::Disconnect);
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("NOVA username");
+                changed |= ui
+                    .add(egui::TextEdit::singleline(&mut self.username).desired_width(150.0))
+                    .changed();
+                ui.label("Password");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.password)
+                        .password(true)
+                        .desired_width(150.0),
+                );
+                if ui.button("Forget saved password").clicked()
+                    && let Ok(host) = IpAddr::from_str(self.settings.nova_host.trim())
+                {
+                    match credentials::delete(&host.to_string(), self.username.trim()) {
+                        Ok(()) => self.diagnostics = "Saved NOVA password removed".to_owned(),
+                        Err(error) => self.diagnostics = format!("Credential store: {error}"),
                     }
                 }
             });
+            ui.horizontal(|ui| {
+                changed |= ui
+                    .checkbox(&mut self.settings.auto_reconnect, "Auto-reconnect")
+                    .changed();
+                ui.label("Poll interval");
+                changed |= ui
+                    .add(
+                        egui::DragValue::new(&mut self.settings.poll_interval_seconds)
+                            .range(1..=120)
+                            .suffix(" s"),
+                    )
+                    .changed();
+            });
+            if !self.discovery_results.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("Discovered:");
+                    for ip in &self.discovery_results {
+                        if ui.button(ip.to_string()).clicked() {
+                            self.settings.nova_host = ip.to_string();
+                            changed = true;
+                        }
+                    }
+                });
+            }
         }
         changed
     }
@@ -470,7 +629,7 @@ impl eframe::App for DesktopApp {
             ui.label("Xbox 360 telemetry for Discord, over your local network");
             ui.add_space(10.0);
             egui::Frame::group(ui.style()).show(ui, |ui| {
-                changed |= self.render_connection(ui);
+                changed |= self.render_connection(ui, ctx);
             });
             ui.add_space(8.0);
             egui::Frame::group(ui.style()).show(ui, |ui| {
