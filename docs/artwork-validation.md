@@ -32,6 +32,8 @@ Transport unit tests validate parsing the body separately from curl response met
 | XBLA | Minecraft fixture resolves in tests; current provider match/artwork is unverified live. |
 | Obscure games | No live exact Title ID/provider record was obtained; no result claimed. |
 | Multi-disc games | x360db documents `media_id` values and per-media edition metadata, but current runtime telemetry supplies only Title ID. Disc-specific artwork cannot be selected safely when discs share a Title ID. |
-| Original Xbox | Not validated or claimed. The active catalog is Xbox 360-specific; an ID is not treated as Original Xbox without an explicit provider platform label. |
+| Original Xbox | Not validated or claimed by the app. The XboxUnity archive documents a title-list `TitleType` for `Xbox1`, but this app currently calls the cover-info endpoint, whose documented contract is Xbox 360 Title IDs and does not return a platform label. The result cannot safely identify an Original Xbox title. |
+
+XboxUnity endpoint caveat: the scraper's API reference gives `http://xboxunity.net/Resources/Lib` as its base URL. The app deliberately uses HTTPS-only requests, but DNS was unavailable here, so HTTPS support/redirects and compatibility of the HTTPS variant remain unverified. Do not weaken the HTTPS-only policy to accommodate the reference URL.
 
 To complete the blocked checks, rerun the provider probes from a network that can resolve and reach both HTTPS hosts, then use a desktop session with Discord running and observe the activity card. Record the actual final URL, status, MIME, exact returned ID/title, cache state, and visible rendering here; do not promote fixture evidence to live verification.
