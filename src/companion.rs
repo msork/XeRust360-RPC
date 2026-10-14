@@ -3,7 +3,13 @@
 //! This module implements protocol primitives only. It does not load, build,
 //! install, or deploy an Xbox executable.
 
-use std::{fmt, io};
+use std::{
+    fmt,
+    io::{self, Read, Write},
+    net::{IpAddr, SocketAddr, TcpListener, TcpStream},
+    sync::mpsc::TryRecvError,
+    time::Instant,
+};
 
 use ring::{
     hmac,
@@ -56,6 +62,28 @@ impl Challenge {
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
+
+    fn message_frame(&self) -> Result<Vec<u8>, ProtocolError> {
+        let message = ChallengeMessage {
+            version: PROTOCOL_VERSION,
+            message_type: "challenge".to_owned(),
+            challenge: hex(&self.0),
+        };
+        encode_frame(&serde_json::to_vec(&message).map_err(|_| ProtocolError::InvalidJson)?)
+    }
+
+    fn from_message(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let message: ChallengeMessage = parse_canonical(payload)?;
+        if message.version != PROTOCOL_VERSION {
+            return Err(ProtocolError::WrongVersion);
+        }
+        if message.message_type != "challenge" {
+            return Err(ProtocolError::WrongMessageType);
+        }
+        Ok(Self(
+            parse_hex_32(&message.challenge).ok_or(ProtocolError::InvalidMac)?,
+        ))
+    }
 }
 
 impl fmt::Debug for Challenge {
@@ -76,7 +104,7 @@ pub enum ProtocolError {
     InvalidSequence,
     InvalidTelemetry(&'static str),
     RandomUnavailable,
-    Io(String),
+    Io(io::ErrorKind),
 }
 
 impl fmt::Display for ProtocolError {
@@ -100,8 +128,8 @@ impl fmt::Display for ProtocolError {
 impl std::error::Error for ProtocolError {}
 
 impl From<io::Error> for ProtocolError {
-    fn from(_: io::Error) -> Self {
-        Self::Io("redacted".to_owned())
+    fn from(error: io::Error) -> Self {
+        Self::Io(error.kind())
     }
 }
 
@@ -111,6 +139,14 @@ struct AuthMessage {
     version: u8,
     message_type: String,
     mac: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChallengeMessage {
+    version: u8,
+    message_type: String,
+    challenge: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -447,9 +483,236 @@ fn parse_hex_32(text: &str) -> Option<[u8; 32]> {
     Some(bytes)
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum CompanionEvent {
+    Connected,
+    Snapshot {
+        sequence: u64,
+        snapshot: TelemetrySnapshot,
+    },
+    Disconnected(&'static str),
+    Rejected(&'static str),
+}
+
+/// A single-session listener. It accepts only authenticated telemetry and has no command path.
+pub struct CompanionServer {
+    address: SocketAddr,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    events: std::sync::mpsc::Receiver<CompanionEvent>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl CompanionServer {
+    pub fn bind(
+        address: SocketAddr,
+        key: SharedKey,
+        heartbeat_timeout: std::time::Duration,
+    ) -> Result<Self, ProtocolError> {
+        if !is_private_or_loopback(address.ip()) || heartbeat_timeout.is_zero() {
+            return Err(ProtocolError::InvalidTelemetry("listener configuration"));
+        }
+        let listener = TcpListener::bind(address)?;
+        listener.set_nonblocking(true)?;
+        let address = listener.local_addr()?;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_thread = std::sync::Arc::clone(&stop);
+        let (event_tx, events) = std::sync::mpsc::channel();
+        let thread = std::thread::Builder::new()
+            .name("xerust360-companion".to_owned())
+            .spawn(move || {
+                while !stop_thread.load(std::sync::atomic::Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((stream, _peer)) => {
+                            let _ = handle_connection(
+                                stream,
+                                &key,
+                                heartbeat_timeout,
+                                &stop_thread,
+                                &event_tx,
+                            );
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(25));
+                        }
+                        Err(_) => {
+                            let _ = event_tx.send(CompanionEvent::Disconnected("Listener failed"));
+                            break;
+                        }
+                    }
+                }
+            })
+            .map_err(ProtocolError::from)?;
+        Ok(Self {
+            address,
+            stop,
+            events,
+            thread: Some(thread),
+        })
+    }
+
+    pub fn local_addr(&self) -> SocketAddr {
+        self.address
+    }
+
+    pub fn try_event(&self) -> Result<CompanionEvent, TryRecvError> {
+        self.events.try_recv()
+    }
+
+    pub fn stop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for CompanionServer {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// A mock peer for local tests. It sends a finite sequence and closes its title session.
+pub fn send_mock_records(
+    address: SocketAddr,
+    key: &SharedKey,
+    records: &[CompanionTelemetry],
+) -> Result<(), ProtocolError> {
+    let mut stream = TcpStream::connect(address)?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
+    let challenge_frame = read_frame(&mut stream)?.ok_or(ProtocolError::InvalidFrameLength)?;
+    let challenge = Challenge::from_message(decode_frame(&challenge_frame)?)?;
+    write_wire_frame(&mut stream, &encode_authentication(key, &challenge))?;
+    for (index, record) in records.iter().enumerate() {
+        let sequence = u64::try_from(index + 1).map_err(|_| ProtocolError::InvalidSequence)?;
+        let frame = encode_telemetry(key, &challenge, sequence, record)?;
+        stream.write_all(&frame)?;
+    }
+    Ok(())
+}
+
+fn handle_connection(
+    mut stream: TcpStream,
+    key: &SharedKey,
+    heartbeat_timeout: std::time::Duration,
+    stop: &std::sync::atomic::AtomicBool,
+    events: &std::sync::mpsc::Sender<CompanionEvent>,
+) -> Result<(), ProtocolError> {
+    stream.set_read_timeout(Some(std::time::Duration::from_millis(250)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
+    let challenge = Challenge::generate()?;
+    stream.write_all(&challenge.message_frame()?)?;
+    let auth_deadline = Instant::now() + std::time::Duration::from_secs(5);
+    let auth_payload = loop {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) || Instant::now() >= auth_deadline {
+            let _ = events.send(CompanionEvent::Rejected("Authentication timed out"));
+            return Ok(());
+        }
+        match read_frame(&mut stream) {
+            Ok(Some(frame)) => break decode_frame(&frame)?.to_vec(),
+            Ok(None) => continue,
+            Err(_) => {
+                let _ = events.send(CompanionEvent::Rejected("Invalid authentication frame"));
+                return Ok(());
+            }
+        }
+    };
+    if verify_authentication(key, &challenge, &auth_payload).is_err() {
+        let _ = events.send(CompanionEvent::Rejected("Authentication failed"));
+        return Ok(());
+    }
+    let _ = events.send(CompanionEvent::Connected);
+    let mut session = AuthenticatedSession::default();
+    let mut last_valid = Instant::now();
+    loop {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = events.send(CompanionEvent::Disconnected("Listener stopped"));
+            return Ok(());
+        }
+        match read_frame(&mut stream) {
+            Ok(Some(frame)) => match session.verify_next(key, &challenge, &frame) {
+                Ok((sequence, snapshot)) => {
+                    last_valid = Instant::now();
+                    if events
+                        .send(CompanionEvent::Snapshot { sequence, snapshot })
+                        .is_err()
+                    {
+                        return Ok(());
+                    }
+                }
+                Err(_) => {
+                    let _ = events.send(CompanionEvent::Rejected("Invalid telemetry frame"));
+                    let _ = events.send(CompanionEvent::Disconnected("Companion session ended"));
+                    return Ok(());
+                }
+            },
+            Ok(None) => {
+                if Instant::now().duration_since(last_valid) >= heartbeat_timeout {
+                    let _ =
+                        events.send(CompanionEvent::Disconnected("Telemetry heartbeat expired"));
+                    return Ok(());
+                }
+            }
+            Err(_) => {
+                let _ = events.send(CompanionEvent::Disconnected("Companion session ended"));
+                return Ok(());
+            }
+        }
+    }
+}
+
+fn read_frame(stream: &mut TcpStream) -> Result<Option<Vec<u8>>, ProtocolError> {
+    let mut header = [0; 4];
+    match stream.read_exact(&mut header[..1]) {
+        Ok(()) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(ProtocolError::from(error)),
+    }
+    stream.read_exact(&mut header[1..])?;
+    let length = u32::from_be_bytes(header) as usize;
+    if length == 0 {
+        return Err(ProtocolError::InvalidFrameLength);
+    }
+    if length > MAX_FRAME_BYTES {
+        return Err(ProtocolError::OversizedFrame);
+    }
+    let mut payload = vec![0; length];
+    stream.read_exact(&mut payload)?;
+    let mut frame = Vec::with_capacity(4 + length);
+    frame.extend_from_slice(&header);
+    frame.extend_from_slice(&payload);
+    Ok(Some(frame))
+}
+
+fn write_wire_frame(stream: &mut TcpStream, payload: &[u8]) -> Result<(), ProtocolError> {
+    stream.write_all(&encode_frame(payload)?)?;
+    Ok(())
+}
+
+fn is_private_or_loopback(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(ip) => ip.is_private() || ip.is_loopback() || ip.is_link_local(),
+        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        net::{Ipv4Addr, SocketAddrV4},
+        thread,
+        time::Duration,
+    };
 
     fn key() -> SharedKey {
         SharedKey::new([0x5a; 32])
@@ -602,5 +865,100 @@ mod tests {
         let key = key();
         assert!(!format!("{key:?}").contains("5a"));
         assert!(!ProtocolError::InvalidMac.to_string().contains("5a"));
+    }
+
+    fn next_event(server: &CompanionServer) -> CompanionEvent {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match server.try_event() {
+                Ok(event) => return event,
+                Err(TryRecvError::Disconnected) => panic!("companion event channel closed"),
+                Err(TryRecvError::Empty) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(TryRecvError::Empty) => panic!("timed out waiting for companion event"),
+            }
+        }
+    }
+
+    fn loopback_server(key: SharedKey, timeout: Duration) -> Option<CompanionServer> {
+        match CompanionServer::bind(
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
+            key,
+            timeout,
+        ) {
+            Ok(server) => Some(server),
+            Err(ProtocolError::Io(io::ErrorKind::PermissionDenied)) => {
+                eprintln!("skipping loopback test: sandbox denies local TCP sockets");
+                None
+            }
+            Err(error) => panic!("could not bind test listener: {error:?}"),
+        }
+    }
+
+    #[test]
+    fn loopback_mock_peer_drives_authenticated_session_and_disconnect() {
+        let key = key();
+        let Some(server) = loopback_server(key.clone(), Duration::from_secs(1)) else {
+            return;
+        };
+        send_mock_records(
+            server.local_addr(),
+            &key,
+            &[CompanionTelemetry {
+                title_id: Some("4D5307E6".to_owned()),
+                gamertag: Some("MockPlayer".to_owned()),
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert_eq!(next_event(&server), CompanionEvent::Connected);
+        match next_event(&server) {
+            CompanionEvent::Snapshot { sequence, snapshot } => {
+                assert_eq!(sequence, 1);
+                assert_eq!(snapshot.game.title_id.as_deref(), Some("4D5307E6"));
+                assert_eq!(snapshot.gamertag.as_deref(), Some("MockPlayer"));
+            }
+            event => panic!("unexpected event: {event:?}"),
+        }
+        assert_eq!(
+            next_event(&server),
+            CompanionEvent::Disconnected("Companion session ended")
+        );
+    }
+
+    #[test]
+    fn idle_companion_expires_and_invalid_key_is_rejected() {
+        let key = key();
+        let Some(server) = loopback_server(key.clone(), Duration::from_millis(350)) else {
+            return;
+        };
+        let mut stream = TcpStream::connect(server.local_addr()).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let challenge_frame = read_frame(&mut stream).unwrap().unwrap();
+        let challenge = Challenge::from_message(decode_frame(&challenge_frame).unwrap()).unwrap();
+        write_wire_frame(&mut stream, &encode_authentication(&key, &challenge)).unwrap();
+        assert_eq!(next_event(&server), CompanionEvent::Connected);
+        assert_eq!(
+            next_event(&server),
+            CompanionEvent::Disconnected("Telemetry heartbeat expired")
+        );
+
+        let Some(bad_server) = loopback_server(key.clone(), Duration::from_secs(1)) else {
+            return;
+        };
+        send_mock_records(bad_server.local_addr(), &SharedKey::new([0; 32]), &[]).unwrap();
+        assert_eq!(
+            next_event(&bad_server),
+            CompanionEvent::Rejected("Authentication failed")
+        );
+    }
+
+    #[test]
+    fn listener_refuses_non_private_bind_addresses() {
+        let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 4), 0));
+        assert!(CompanionServer::bind(address, key(), Duration::from_secs(1)).is_err());
     }
 }
