@@ -81,3 +81,5 @@ Every milestone is committed separately after its acceptance checks. Update thes
 | T-17 | NOVA selection while companion absent | Existing NOVA integration works unchanged. |
 | T-18 | Xbox artifact feasibility gate | Require evidence for PPC game ABI, imports, XEX/DLL packaging, Peer Pressure entrypoint, and teardown before any binary is added. |
 | T-19 | Companion title transition/exit | Treat process/title termination as disconnect, expire all values, clear presence, and start a new timer only on fresh authenticated data. |
+| T-20 | TCP peer closes after valid telemetry | Detect EOF as immediate session disconnect; do not wait for heartbeat timeout. |
+| T-21 | Authenticated peer sends malformed telemetry frame | Reject the frame, end the session, and preserve the last trusted snapshot until the coordinator clears the disconnected source. |
