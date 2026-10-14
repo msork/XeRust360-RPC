@@ -16,7 +16,7 @@
 4. GUI smoke checks: mock mode, toggle behavior, diagnostics, and settings round trip; Linux tray actions; manual checks where native desktop automation is unavailable. Windows/macOS tray coverage is pending their tray implementation.
 5. Build/CI checks: formatting, tests, clippy, and compile jobs for Linux, Windows, and macOS.
 6. Companion protocol tests: local loopback mock peer; valid and invalid framing, payload bounds, HMAC challenge/golden vectors, versioning, fixed serialization, monotonic sequence/freshness, idle timeout, explicit process/session termination, and omitted metric preservation. No console required.
-7. Compatibility evidence: maintain matrix by boot method, motherboard class, kernel, dashboard/source, and DLL lifecycle. A cell is “verified” only with real hardware evidence; otherwise label it “not tested” or “not applicable”.
+7. Compatibility evidence: maintain [`../docs/compatibility.md`](../docs/compatibility.md) by boot method, motherboard class, kernel, dashboard/source, and DLL lifecycle. A cell is “verified” only with real hardware evidence; otherwise label it “not tested” or “not applicable”.
 
 ## Local commands
 

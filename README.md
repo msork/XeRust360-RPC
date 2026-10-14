@@ -7,6 +7,7 @@ A Rust desktop companion that reads Xbox 360 telemetry from Aurora's NOVA LAN AP
 - Linux, Windows, and macOS desktop builds (CI checks all three).
 - Linux StatusNotifier tray controls. Windows and macOS currently have a window only; closing the window exits the app.
 - NOVA on Aurora (default port 9999), optional credentials via the OS credential store, local subnet discovery, and reconnect backoff.
+- Experimental authenticated LAN listener for a user-built, title-scoped Peer Pressure companion. The app ships protocol code and a mock peer only; it does not ship, build, configure, or deploy an Xbox DLL.
 - Discord Rich Presence through local IPC only. No Discord user tokens, self-bots, Gateway sessions, or web login.
 - Mock telemetry mode for preview without a console or Discord.
 
@@ -40,6 +41,14 @@ Discord must be running as the current desktop user for local IPC presence to ap
 The app reads title ID, signed-in profile/gamertag/gamerscore, achievement progress, and CPU/GPU temperatures from NOVA endpoints. NOVA versions or dashboard plugins may omit some fields. Unavailable values are omitted from presence; they are never replaced with invented values. NOVA's achievement data is indexed by signed-in profile slot. Temperatures are converted to Celsius when NOVA declares Fahrenheit.
 
 All console traffic remains on the local network. Settings contain no password. Diagnostics redact credentials and tokens. For implementation details, acceptance criteria, and test cases, see [`specs/`](specs/).
+
+### Peer Pressure companion (experimental)
+
+Peer Pressure documents DLL sideloading for specific title launches. A sideloaded DLL is not a console-wide daemon: dashboard use, unsupported titles, title transitions, and process exit can leave no companion running. XeRust360-RPC's optional listener accepts an authenticated, read-only protocol from a configured companion and clears the game session when its connection expires. Protocol v1 uses length-prefixed JSON and HMAC-SHA256 challenge authentication; the session key belongs in the OS credential store and must also be configured in the separately developed DLL.
+
+The listener can be exercised with the included mock sender. **No Xbox companion DLL is included or hardware-verified.** No stable public Peer Pressure telemetry API is documented. A running title companion may report its Title ID; gamertag, achievements, gamerscore, and CPU/GPU temperatures remain unavailable until a safe, documented source is proven. No memory scans/patches, kernel hooks, boot changes, NAND writes, DashLaunch plugins, or automatic deployment are used.
+
+See [`docs/compatibility.md`](docs/compatibility.md) for the current boot-method and motherboard evidence matrix. Peer Pressure's own documented support does not imply this app's DLL companion is compatible.
 
 ## Build and verify
 

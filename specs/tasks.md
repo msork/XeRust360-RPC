@@ -42,9 +42,10 @@ Every milestone is committed separately after its acceptance checks. Update thes
 
 ## M6 — Optional Peer Pressure companion protocol (mock-first)
 
-- [ ] Define versioned, bounded, authenticated read-only LAN protocol, freshness/lifecycle semantics, and metric availability contract in all applicable specs before implementation.
-- [ ] Implement mock companion sender, desktop listener/source adapter, source selection, stale-session clearing, and diagnostics without Xbox binary or deployment support.
-- [ ] Add protocol tests for valid fields, malformed/oversized/stale/unauthenticated/version-mismatch frames, lifecycle stop, and absence preservation.
+- [x] Define versioned, bounded, authenticated read-only LAN protocol, freshness/lifecycle semantics, and metric availability contract in all applicable specs before implementation.
+- [x] Implement mock companion sender, desktop listener/source adapter, source selection, stale-session clearing, and diagnostics without Xbox binary or deployment support.
+- [x] Add protocol tests for valid fields, malformed/oversized/stale/unauthenticated/version-mismatch frames, lifecycle stop, and absence preservation.
+- [ ] Run socket integration tests on an unsandboxed runner; current sandbox denies loopback TCP binds, so those tests are skipped locally.
 - Acceptance: desktop flow is testable entirely with mock peer; no companion message can issue console commands; existing NOVA behavior remains covered.
 
 ## M7 — Hardware feasibility and compatibility validation (blocked on equipment/toolchain)
