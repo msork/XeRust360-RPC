@@ -692,7 +692,12 @@ fn read_frame(stream: &mut TcpStream) -> Result<Option<Vec<u8>>, ProtocolError> 
         {
             return Ok(None);
         }
-        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        // EOF means the peer's title process/session ended. Only a socket read
+        // timeout is an idle heartbeat interval; treating EOF as idle delays
+        // disconnect handling until the heartbeat deadline.
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+            return Err(ProtocolError::from(error));
+        }
         Err(error) => return Err(ProtocolError::from(error)),
     }
     stream.read_exact(&mut header[1..])?;
@@ -959,6 +964,32 @@ mod tests {
             }
             event => panic!("unexpected event: {event:?}"),
         }
+        assert_eq!(
+            next_event(&server),
+            CompanionEvent::Disconnected("Companion session ended")
+        );
+    }
+
+    #[test]
+    fn authenticated_peer_with_invalid_message_is_rejected_and_disconnected() {
+        let key = key();
+        let Some(server) = loopback_server(key.clone(), Duration::from_secs(2)) else {
+            return;
+        };
+        let mut stream = TcpStream::connect(server.local_addr()).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let challenge_frame = read_frame(&mut stream).unwrap().unwrap();
+        let challenge = Challenge::from_message(decode_frame(&challenge_frame).unwrap()).unwrap();
+        write_wire_frame(&mut stream, &encode_authentication(&key, &challenge)).unwrap();
+        assert_eq!(next_event(&server), CompanionEvent::Connected);
+
+        stream.write_all(&encode_frame(b"{}").unwrap()).unwrap();
+        assert_eq!(
+            next_event(&server),
+            CompanionEvent::Rejected("Invalid telemetry frame")
+        );
         assert_eq!(
             next_event(&server),
             CompanionEvent::Disconnected("Companion session ended")
