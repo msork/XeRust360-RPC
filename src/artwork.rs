@@ -20,6 +20,17 @@ const NEGATIVE_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_CACHE_ENTRIES: usize = 2_000;
 const MAX_CACHE_BYTES: u64 = 512 * 1024 * 1024;
 const DISCORD_IMAGE_URL_MAX_CHARS: usize = 300;
+const MAX_REDIRECTS: u32 = 5;
+const CURL_METADATA_MARKER: &str = "\n__XERUST_CURL_METADATA__";
+
+#[derive(Debug, PartialEq, Eq)]
+struct HttpResponse {
+    body: Vec<u8>,
+    status: u16,
+    content_type: String,
+    redirects: u32,
+    final_url: String,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameMetadata {
@@ -204,10 +215,9 @@ impl ArtworkResolver {
         {
             match fetch_and_cache_cover(url, &self.cache_dir, &normalized) {
                 Ok(path) => metadata.cached_cover_path = Some(path),
-                Err(_) => {
-                    metadata.cover_url = None;
-                    metadata.official_cover = None;
-                }
+                // Keep the public URL for Discord; local download/cache failure
+                // does not prove that Discord's media proxy cannot reach it.
+                Err(_) => metadata.cached_cover_path = None,
             }
         }
 
@@ -375,14 +385,17 @@ impl MetadataProvider for X360DbProvider {
                 .is_some_and(|(loaded_at, _)| loaded_at.elapsed() < METADATA_TTL);
             if !is_fresh {
                 self.limiter.wait();
-                let Some(bytes) = curl_get(
+                let Some(response) = curl_get(
                     "https://xenia-manager.github.io/x360db/games.json",
                     MAX_METADATA_BYTES,
                 )?
                 else {
                     return Ok(None);
                 };
-                let parsed: Vec<X360DbEntry> = serde_json::from_slice(&bytes)
+                if !is_json_content_type(&response.content_type) {
+                    return Err(ArtworkError::Provider(self.name().to_owned()));
+                }
+                let parsed: Vec<X360DbEntry> = serde_json::from_slice(&response.body)
                     .map_err(|_| ArtworkError::Provider(self.name().to_owned()))?;
                 *index = Some((std::time::Instant::now(), parsed));
             }
@@ -418,10 +431,13 @@ impl MetadataProvider for XboxUnityProvider {
         self.limiter.wait();
         let endpoint =
             format!("https://xboxunity.net/Resources/Lib/CoverInfo.php?titleid={title_id}");
-        let Some(bytes) = curl_get(&endpoint, MAX_METADATA_BYTES)? else {
+        let Some(response) = curl_get(&endpoint, MAX_METADATA_BYTES)? else {
             return Ok(None);
         };
-        parse_xboxunity_covers(&bytes, title_id)
+        if !is_json_content_type(&response.content_type) {
+            return Err(ArtworkError::Provider(self.name().to_owned()));
+        }
+        parse_xboxunity_covers(&response.body, title_id)
     }
 }
 
@@ -448,7 +464,7 @@ fn remaining_interval(elapsed: Duration, interval: Duration) -> Duration {
     interval.saturating_sub(elapsed)
 }
 
-fn curl_get(url: &str, max_bytes: usize) -> Result<Option<Vec<u8>>, ArtworkError> {
+fn curl_get(url: &str, max_bytes: usize) -> Result<Option<HttpResponse>, ArtworkError> {
     if !valid_discord_image_url(url) && !url.starts_with("https://xenia-manager.github.io/") {
         return Err(ArtworkError::Provider(
             "rejected non-HTTPS provider URL".to_owned(),
@@ -471,19 +487,74 @@ fn curl_get(url: &str, max_bytes: usize) -> Result<Option<Vec<u8>>, ArtworkError
             "=https",
             "--proto-redir",
             "=https",
+            "--write-out",
+            "\n__XERUST_CURL_METADATA__%{http_code}\n%{content_type}\n%{num_redirects}\n%{url_effective}\n",
             url,
         ])
         .output()
         .map_err(|_| ArtworkError::Provider("curl is unavailable".to_owned()))?;
-    if output.status.code() == Some(22) || output.status.code() == Some(63) {
+    let Some(response) = parse_curl_response(&output.stdout) else {
+        if output.status.code() == Some(63) {
+            return Err(ArtworkError::Provider(
+                "response exceeded configured size limit".to_owned(),
+            ));
+        }
+        return Err(ArtworkError::Provider(
+            "HTTPS response metadata was unavailable".to_owned(),
+        ));
+    };
+    if response.status == 404 || response.status == 410 {
         return Ok(None);
     }
-    if !output.status.success() || output.stdout.len() > max_bytes {
+    if !output.status.success()
+        || response.status != 200
+        || response.redirects > MAX_REDIRECTS
+        || response.body.len() > max_bytes
+        || !valid_discord_image_url(&response.final_url)
+    {
         return Err(ArtworkError::Provider(
             "HTTPS request failed or response exceeded limit".to_owned(),
         ));
     }
-    Ok(Some(output.stdout))
+    Ok(Some(response))
+}
+
+fn parse_curl_response(output: &[u8]) -> Option<HttpResponse> {
+    let marker = CURL_METADATA_MARKER.as_bytes();
+    let marker_at = output
+        .windows(marker.len())
+        .rposition(|part| part == marker)?;
+    let body = output[..marker_at].to_vec();
+    let metadata = std::str::from_utf8(&output[marker_at + marker.len()..]).ok()?;
+    let mut lines = metadata.lines();
+    let status = lines.next()?.parse().ok()?;
+    let content_type = lines.next()?.trim().to_ascii_lowercase();
+    let redirects = lines.next()?.parse().ok()?;
+    let final_url = lines.next()?.trim().to_owned();
+    Some(HttpResponse {
+        body,
+        status,
+        content_type,
+        redirects,
+        final_url,
+    })
+}
+
+fn is_json_content_type(content_type: &str) -> bool {
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    media_type == "application/json" || media_type == "text/json" || media_type.ends_with("+json")
+}
+
+fn is_supported_image_content_type(content_type: &str) -> bool {
+    matches!(
+        content_type.split(';').next().unwrap_or_default().trim(),
+        "image/jpeg" | "image/png" | "image/webp"
+    )
 }
 
 fn fetch_and_cache_cover(url: &str, cache_dir: &Path, title_id: &str) -> io::Result<PathBuf> {
@@ -506,18 +577,28 @@ fn fetch_and_cache_cover(url: &str, cache_dir: &Path, title_id: &str) -> io::Res
             "=https",
             "--proto-redir",
             "=https",
+            "--write-out",
+            "\n__XERUST_CURL_METADATA__%{http_code}\n%{content_type}\n%{num_redirects}\n%{url_effective}\n",
             url,
         ])
         .output()?;
+    let response = parse_curl_response(&output.stdout);
+    let Some(response) = response else {
+        return Err(io::Error::other("cover response metadata was unavailable"));
+    };
     if !output.status.success()
-        || output.stdout.len() > MAX_IMAGE_BYTES
-        || !is_supported_image(&output.stdout)
+        || response.status != 200
+        || response.redirects > MAX_REDIRECTS
+        || response.body.len() > MAX_IMAGE_BYTES
+        || !valid_discord_image_url(&response.final_url)
+        || !is_supported_image_content_type(&response.content_type)
+        || !is_supported_image(&response.body)
     {
         return Err(io::Error::other(
-            "cover download failed, exceeded size limit, or had unsupported image format",
+            "cover download failed, exceeded size limit, or had unsupported content type/format",
         ));
     }
-    cache_cover_bytes(&output.stdout, cache_dir, title_id)
+    cache_cover_bytes(&response.body, cache_dir, title_id)
 }
 
 fn cache_cover_bytes(bytes: &[u8], cache_dir: &Path, title_id: &str) -> io::Result<PathBuf> {
@@ -669,6 +750,31 @@ mod tests {
     };
 
     static TEMP_ID: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn curl_transport_parses_redirect_and_content_metadata_separately_from_body() {
+        let bytes = [
+            b"\x89PNG\r\n\x1a\n".as_slice(),
+            CURL_METADATA_MARKER.as_bytes(),
+            b"200\nimage/png; charset=binary\n2\nhttps://cdn.example/game.png\n",
+        ]
+        .concat();
+        let response = parse_curl_response(&bytes).unwrap();
+        assert_eq!(response.body, b"\x89PNG\r\n\x1a\n");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.redirects, 2);
+        assert_eq!(response.final_url, "https://cdn.example/game.png");
+        assert!(is_supported_image_content_type(&response.content_type));
+        assert!(!is_supported_image(&b"<html>error</html>"[..]));
+    }
+
+    #[test]
+    fn provider_json_content_type_is_checked_with_parameters() {
+        assert!(is_json_content_type("application/json; charset=utf-8"));
+        assert!(is_json_content_type("application/vnd.example+json"));
+        assert!(!is_json_content_type("text/html"));
+        assert!(!is_supported_image_content_type("text/html"));
+    }
 
     struct FixtureProvider {
         name: &'static str,
