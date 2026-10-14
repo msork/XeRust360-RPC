@@ -126,6 +126,7 @@ struct State {
     artwork_requests: Sender<String>,
     requested_artwork_title: Option<String>,
     latest_snapshot: Option<TelemetrySnapshot>,
+    current_artwork: Option<(String, GameMetadata)>,
 }
 
 fn run_worker(
@@ -165,6 +166,7 @@ fn run_worker(
         artwork_requests: artwork_request_tx,
         requested_artwork_title: None,
         latest_snapshot: None,
+        current_artwork: None,
     };
     loop {
         let timeout = state
@@ -448,12 +450,22 @@ impl State {
 }
 
 fn update_and_publish(state: &mut State, snapshot: TelemetrySnapshot) {
+    let mut snapshot = snapshot;
     if !state.settings.mock_mode
         && let Some(title_id) = snapshot.game.title_id.as_deref()
-        && state.requested_artwork_title.as_deref() != Some(title_id)
     {
-        state.requested_artwork_title = Some(title_id.to_owned());
-        let _ = state.artwork_requests.send(title_id.to_owned());
+        if let Some((resolved_id, metadata)) = &state.current_artwork
+            && resolved_id == title_id
+        {
+            apply_game_metadata(&mut snapshot, metadata);
+        } else if state.requested_artwork_title.as_deref() != Some(title_id) {
+            state.current_artwork = None;
+            state.requested_artwork_title = Some(title_id.to_owned());
+            let _ = state.artwork_requests.send(title_id.to_owned());
+        }
+    } else if snapshot.game.title_id.is_none() {
+        state.requested_artwork_title = None;
+        state.current_artwork = None;
     }
     state.latest_snapshot = Some(snapshot.clone());
     let title_key = snapshot
@@ -484,13 +496,9 @@ fn process_artwork_results(
         }
         match result {
             Ok(Some(metadata)) => {
-                if snapshot.game.name.is_none() {
-                    snapshot.game.name = metadata.name;
-                }
-                snapshot.game.cover_url = metadata.cover_url;
-                snapshot.game.artwork_source = Some(metadata.source);
-                snapshot.game.cached_cover_path = metadata.cached_cover_path;
-                let snapshot = snapshot.clone();
+                state.current_artwork = Some((title_id, metadata.clone()));
+                let mut snapshot = snapshot.clone();
+                apply_game_metadata(&mut snapshot, &metadata);
                 update_and_publish(state, snapshot.clone());
                 let _ = events.send(WorkerEvent::Snapshot {
                     elapsed: state.session.elapsed(Instant::now()),
@@ -507,6 +515,18 @@ fn process_artwork_results(
             }
         }
     }
+}
+
+fn apply_game_metadata(snapshot: &mut TelemetrySnapshot, metadata: &GameMetadata) {
+    if snapshot.game.title_id.as_deref() != Some(metadata.title_id.as_str()) {
+        return;
+    }
+    if snapshot.game.name.is_none() {
+        snapshot.game.name = metadata.name.clone();
+    }
+    snapshot.game.cover_url = metadata.cover_url.clone();
+    snapshot.game.artwork_source = Some(metadata.source.clone());
+    snapshot.game.cached_cover_path = metadata.cached_cover_path.clone();
 }
 
 fn publish(state: &mut State, presence: Option<&PresencePayload>) {
@@ -588,4 +608,54 @@ fn send_status(state: &State, events: &Sender<WorkerEvent>) {
         discord: state.discord_status.clone(),
         diagnostic: state.diagnostic.clone(),
     });
+}
+
+#[cfg(test)]
+mod artwork_tests {
+    use super::*;
+
+    fn metadata() -> GameMetadata {
+        GameMetadata {
+            title_id: "4D5307E6".to_owned(),
+            name: Some("Halo 3".to_owned()),
+            cover_url: Some("https://art.example/halo3.jpg".to_owned()),
+            source: "fixture".to_owned(),
+            official_cover: Some(true),
+            related_title_ids: Vec::new(),
+            cached_cover_path: None,
+        }
+    }
+
+    #[test]
+    fn refreshed_telemetry_for_same_title_keeps_resolved_cover_and_name() {
+        let meta = metadata();
+        let mut first = TelemetrySnapshot {
+            game: crate::domain::GameIdentity {
+                title_id: Some("4D5307E6".to_owned()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        apply_game_metadata(&mut first, &meta);
+        let mut refreshed = TelemetrySnapshot {
+            game: crate::domain::GameIdentity {
+                title_id: Some("4D5307E6".to_owned()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        apply_game_metadata(&mut refreshed, &meta);
+        assert_eq!(refreshed.game.name.as_deref(), Some("Halo 3"));
+        assert_eq!(
+            refreshed.game.cover_url.as_deref(),
+            Some("https://art.example/halo3.jpg")
+        );
+
+        refreshed.game.title_id = Some("DEADBEEF".to_owned());
+        refreshed.game.name = None;
+        refreshed.game.cover_url = None;
+        apply_game_metadata(&mut refreshed, &meta);
+        assert!(refreshed.game.name.is_none());
+        assert!(refreshed.game.cover_url.is_none());
+    }
 }
