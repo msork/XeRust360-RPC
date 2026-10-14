@@ -84,8 +84,8 @@ Every milestone is committed separately after its acceptance checks. Update thes
 
 ## M10 — Artwork end-to-end validation and diagnostics
 
-- [ ] Add diagnostics for observed Title ID, exact resolved title, provider, public image URL, cache status, and fallback reason; never expose credentials or raw provider bodies.
-- [ ] Add controlled tests for redirects, content type/image signature, cache reuse, rate limits, and provider outages.
+- [x] Add diagnostics for observed Title ID, exact resolved title, provider, public image URL, cache status, and fallback reason; never expose credentials or raw provider bodies.
+- [x] Add controlled tests for redirects, content type/image signature, cache reuse, rate limits, and provider outages.
 - [ ] Run opt-in live x360db and XboxUnity checks for representative disc, XBLA, obscure, and multi-disc records; document Original Xbox coverage only when provider metadata explicitly labels it.
 - [ ] Record actual HTTP/DNS outcomes, exact matching, and cache results; blocked network is not a passing provider result.
 - [ ] Verify external HTTPS artwork with official local IPC and a running Discord desktop client; confirm visible image rendering. IPC payload acceptance alone is insufficient.

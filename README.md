@@ -36,6 +36,8 @@ Known Xbox 360 Title IDs resolve game names and box art through the x360db metad
 
 The metadata providers are community resources. x360db documents about 6,000 Xbox 360 entries, alternate IDs, media IDs, and per-title box-art URLs, but does not document a separate cover-art license. XboxUnity's cover API documents an official/community flag; its archive license excludes original cover images and does not establish permission for those images, API uptime, or hotlinking. XeRust360-RPC does not bundle or rehost cover art. Provider traffic includes the currently observed Title ID; no credentials or other telemetry are sent to these providers. You can keep the app offline to use locally cached metadata/artwork, or rely on the generic Discord asset. Title ID-only telemetry cannot select between discs sharing a Title ID. Original Xbox identification is not claimed unless a provider explicitly identifies the platform. Artwork diagnostics show title ID, match/provider, image URL, cache state, and fallback reason.
 
+The current endpoint and Discord-client verification record is in [`docs/artwork-validation.md`](docs/artwork-validation.md). Fixture results are separated from live provider matches and visible Discord rendering.
+
 Artwork lookup uses the system `curl` executable for bounded HTTPS requests (connect/total timeout and response-size caps). It is available by default on current Windows, macOS, and common Linux installations; if missing or blocked, title telemetry continues and a provider diagnostic is shown.
 
 Discord must be running as the current desktop user for local IPC presence to appear. The app shows its preview even when Discord is unavailable.
