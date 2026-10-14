@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod companion;
 pub mod credentials;
 pub mod discord;
 pub mod domain;
