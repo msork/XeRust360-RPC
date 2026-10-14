@@ -8,6 +8,7 @@ The main window is a compact dashboard with a title bar, console connection sect
 
 - Header: XeRust360-RPC name/icon, running state, and menu.
 - Console: host, Discover, Connect/Disconnect, and status (Searching, Connected, Reconnecting, Unavailable).
+- Telemetry source: NOVA, optional Xbox companion, or mock. NOVA remains the supported default for compatible consoles; companion status must name the configured title/session and distinguish “no companion process” from console/network failure.
 - Discord: detected/connected status and presence publish status.
 - Preview: “Playing Xbox 360”, game in Details, composed State, elapsed time, large artwork and small project icon.
 - Statistics: per-field toggles for gamertag, achievements, game GS, total GS, CPU, and GPU.
@@ -32,6 +33,14 @@ Discord's official Rich Presence SDK documents text fields with a maximum of 128
 - Credentials use password controls and are never included in previews, logs, or copied diagnostics.
 - Tray menu offers Show, Pause/Resume presence, and Quit. Closing the window hides to tray only when tray support is available; otherwise it quits or minimizes according to platform convention.
 - On first launch, mock mode is discoverable and can produce a safe local preview without a console.
+
+## Optional Peer Pressure companion
+
+The companion option is an expert opt-in. The desktop app opens a bounded LAN listener and displays its address, selected port, session status, and last valid message. It does not write files to the Xbox, edit Peer Pressure configuration, sideload, or deploy a DLL. Users must independently build and configure a title-specific read-only DLL through supported Peer Pressure mechanisms. When that game exits or stops sending fresh telemetry, the app clears stale fields/presence and ends the game timer. With no active supported DLL, companion mode is unavailable; it does not fall back to invented values.
+
+The wire protocol is versioned, length-prefixed, field-allowlisted, and authenticated for one user-configured session. Protocol v1 uses companion-initiated TCP, a 4-byte big-endian frame length (maximum 4096 bytes), JSON messages, a fresh 32-byte server challenge, and HMAC-SHA256 with a 32-byte key entered independently in the desktop app and companion config. MAC input uses domain separation, challenge, and a strictly increasing sequence; telemetry message compact JSON field order is fixed and covered by golden vectors. Bind only to the selected private LAN interface by default. Accept telemetry records only after authentication; there are no remote commands. Reject unknown versions, unknown JSON fields, invalid tags/IDs/ranges, bad MACs, repeated sequences, and idle sessions after a configurable heartbeat timeout. Never place Discord tokens, NOVA passwords, CPU keys, NAND data, or arbitrary memory contents in a companion message. The shared key is a companion-specific secret and must use the app's secure credential storage, never normal settings or diagnostics.
+
+The UI labels every companion field as “reported” and may show unavailable for metrics the DLL cannot obtain. Title ID and elapsed time are not inferred from a sideload config alone; they require a fresh message from a running title. Profile, achievement, gamerscore, and CPU/GPU readings stay absent until their APIs are verified on hardware.
 
 ## Artwork
 

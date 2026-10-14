@@ -15,6 +15,8 @@
 3. IPC protocol tests: in-memory framed Discord handshake, activity update payload, clear command, invalid application IDs, and invalid payload bounds. Manual checks verify real Unix socket/named pipe discovery against a running client.
 4. GUI smoke checks: mock mode, toggle behavior, diagnostics, and settings round trip; Linux tray actions; manual checks where native desktop automation is unavailable. Windows/macOS tray coverage is pending their tray implementation.
 5. Build/CI checks: formatting, tests, clippy, and compile jobs for Linux, Windows, and macOS.
+6. Companion protocol tests: local loopback mock peer; valid and invalid framing, payload bounds, HMAC challenge/golden vectors, versioning, fixed serialization, monotonic sequence/freshness, idle timeout, explicit process/session termination, and omitted metric preservation. No console required.
+7. Compatibility evidence: maintain matrix by boot method, motherboard class, kernel, dashboard/source, and DLL lifecycle. A cell is “verified” only with real hardware evidence; otherwise label it “not tested” or “not applicable”.
 
 ## Local commands
 
@@ -32,3 +34,9 @@ cargo check --workspace
 - Confirm CPU/GPU readings and units against NOVA response.
 - Start/stop a title and confirm timer resets, unknown-title fallback, disconnect handling, and reconnect.
 - Confirm Discord activity appears only while local Discord accepts RPC and clears on app shutdown.
+- Peer Pressure: verify configured game DLL loads and unloads per title, reports its running Title ID only while loaded, and loses network without stale presence. Hardware test must not install/modify boot files through this application.
+- Validate each non-title metric independently against a documented runtime API and console UI; unavailable API means unavailable telemetry.
+
+## Compatibility matrix policy
+
+Track Aurora NOVA on BadUpdate/ABadAvatar, Aurora NOVA on JTAG/RGH, Peer Pressure on supported Xenon/Zephyr/Falcon/Opus/Jasper/Trinity revisions, and unsupported Corona/Winchester/Waitsburg/Stingray/Barracuda revisions separately. Peer Pressure's documented motherboard support is not equivalent to this app's companion support. The companion remains unverified on all consoles until its DLL and protocol are exercised on hardware. Record title ID, kernel (currently Peer Pressure docs cite 2.0.17599), dashboard, DLL build/toolchain and observed fields for every actual test.

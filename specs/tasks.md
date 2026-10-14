@@ -5,6 +5,7 @@ Every milestone is committed separately after its acceptance checks. Update thes
 ## M0 — Research and specification (complete before code)
 
 - [x] Review XeCord, NOVA API documentation, BadUpdate/ABadAvatar context, Discord Rich Presence docs, and supplied Reddit link availability.
+- [x] Research Peer Pressure's public docs, title-scoped DLL sideloading, hardware compatibility, public source/API availability, and Xenon toolchain constraints.
 - [x] Define product requirements, architecture, GUI design, tasks, and test cases.
 - Acceptance: all five spec files exist and research constraints are explicit.
 
@@ -39,6 +40,21 @@ Every milestone is committed separately after its acceptance checks. Update thes
 - [x] Check format, tests, lint/build workflow where supported.
 - Acceptance: CI configuration covers all target OSes; native Linux checks pass locally.
 
+## M6 — Optional Peer Pressure companion protocol (mock-first)
+
+- [ ] Define versioned, bounded, authenticated read-only LAN protocol, freshness/lifecycle semantics, and metric availability contract in all applicable specs before implementation.
+- [ ] Implement mock companion sender, desktop listener/source adapter, source selection, stale-session clearing, and diagnostics without Xbox binary or deployment support.
+- [ ] Add protocol tests for valid fields, malformed/oversized/stale/unauthenticated/version-mismatch frames, lifecycle stop, and absence preservation.
+- Acceptance: desktop flow is testable entirely with mock peer; no companion message can issue console commands; existing NOVA behavior remains covered.
+
+## M7 — Hardware feasibility and compatibility validation (blocked on equipment/toolchain)
+
+- [ ] Verify a supported Xenon ABI/XEX-DLL toolchain and Peer Pressure sideload contract without modifying console boot/NAND or using hooks.
+- [ ] Prototype only after static review and mock protocol pass; no automatic deployment.
+- [ ] Validate a minimal read-only companion on real hardware, including game launch/exit, unload, network loss, and supported motherboard/boot method.
+- [ ] Measure which telemetry fields have documented and stable APIs; enable them only after verification.
+- Acceptance: hardware results and unverified cases are recorded; no game-wide support claim without evidence.
+
 ## Milestone test cases
 
 | ID | Case | Expected result |
@@ -55,3 +71,8 @@ Every milestone is committed separately after its acceptance checks. Update thes
 | T-10 | Discord IPC path unavailable | App remains usable and reports Discord disconnected. |
 | T-11 | Settings save/reload | Non-secret settings persist; password goes through credential adapter. |
 | T-12 | Mock mode on each OS | Preview works without console/Discord connection. |
+| T-13 | Companion sends valid title-scoped record | Only provided fields enter telemetry; session timer starts from fresh observation. |
+| T-14 | Companion exits or heartbeat expires | Session goes unavailable, stale values clear, presence is cleared, and next game gets a new timer. |
+| T-15 | Invalid, oversized, stale, unauthenticated, or wrong-version companion frame | Reject frame without changing current trusted telemetry or crashing. |
+| T-16 | Companion record omits achievements/profile/temperature | Those values remain absent; no fallback to guessed values. |
+| T-17 | NOVA selection while companion absent | Existing NOVA integration works unchanged. |

@@ -23,7 +23,12 @@ XeRust360-RPC is a native desktop companion for Linux, Windows, and macOS. It re
 8. Set large artwork to a known Discord application asset for the game when available. Until a catalog/asset mapping exists, show a neutral placeholder. Small artwork uses a project icon asset. Missing artwork must not break presence.
 9. Provide a minimal native GUI with live presence preview, connection/Discord status, independent stat toggles, secure credential storage, settings persistence, and diagnostics that avoid exposing credentials.
 10. Provide tray controls for show/hide, pausing presence, and quitting on supported platforms. Current implementation supports Linux; Windows and macOS tray support is outstanding.
-10. Include a mock telemetry source and automated tests for parsing, formatting, reconnect state, and presence serialization. Add CI for supported host builds.
+11. Preserve Aurora NOVA as the supported live telemetry path for compatible BadUpdate/ABadAvatar and JTAG/RGH setups.
+12. Add an optional read-only LAN companion protocol for a user-provided Peer Pressure per-title DLL. The desktop listener accepts only documented, allowlisted telemetry messages and does not install, configure, or deploy console files.
+13. Treat a Peer Pressure DLL as title-scoped and potentially absent: it is loaded only for games explicitly configured for sideloading, and its lifetime ends with the host title/process. Never assume it runs at dashboard boot or across game transitions.
+14. Never claim a metric the companion cannot observe from a stable, documented source. Title ID and title lifecycle are candidate observations; gamertag, achievements, gamerscore, and CPU/GPU temperatures remain unavailable unless a supported title/runtime API is demonstrated. Never inspect or patch arbitrary game memory.
+15. Include mock companion telemetry, protocol security/compatibility tests, a console compatibility matrix, and cross-platform desktop CI. Real console hardware validation remains explicitly marked unverified until performed.
+16. Discord presence remains exclusively official local RPC/SDK. No Discord user tokens, self-bots, Gateway automation, or credential extraction.
 
 ## Security and privacy
 
@@ -46,5 +51,9 @@ XeRust360-RPC is a native desktop companion for Linux, Windows, and macOS. It re
 - XeCord demonstrates the console-plugin approach but its README explicitly says it uses Discord's User Gateway and asks users to provide a user token. That approach is excluded.
 - NOVA 0.7b.2 r1622 documentation describes Aurora-hosted API at port 9999 and endpoints including `/title`, `/profile`, `/achievement`, `/achievement/player`, `/temperature`, and `/authenticate`.
 - The supplied Reddit beta-preview URL could not be retrieved during research; no requirements are inferred from its contents.
+- Peer Pressure's public README/wiki documents per-title DLL sideloading, not a general telemetry API. Its source is not published. Sideload execution is game-scoped and must not be treated as persistent. It excludes DashLaunch/plugins; force-loaded DLLs may destabilize the softmod.
+- The standard libXenon toolchain targets bare-metal homebrew and does not produce a Peer Pressure-compatible game DLL by itself. A game DLL requires a Xenon/XDK-compatible ABI, imports and XEX/DLL packaging; toolchain and runtime compatibility are not verified on hardware.
+- The requested Reddit URL remains unavailable, so it provides no confirmed technical contract.
+- Research links: [Peer Pressure README](https://github.com/grimdoomer/Xbox360PeerPressure/blob/main/README.md), [Peer Pressure Softmod Features](https://github.com/grimdoomer/Xbox360PeerPressure/wiki/Softmod-Features), [Peer Pressure compatibility summary](https://consolemods.org/wiki/Xbox_360:Peer_Pressure), [Peer Pressure issue discussion](https://github.com/grimdoomer/Xbox360PeerPressure/issues/1), [XeCord README](https://github.com/UncreativeXenon/XeCord/blob/master/README.md), [libXenon toolchain](https://github.com/Free60Project/libxenon), [Xenon ABI/XEX toolchain notes](https://github.com/MrMilenko/OXDK/blob/main/docs/xbox360.md), and the [requested Reddit preview](https://www.reddit.com/r/360hacks/comments/1vma14r/discord_presence_beta_preview/) (unavailable during research).
 - Nova's public documentation does not guarantee that every requested stat is returned by every dashboard/plugin version. Parsers and UI must represent unavailable data honestly.
 - Discord's official Rich Presence documentation describes `name`, `details`, `state`, `timestamps`, and `assets`; official SDK field documentation caps detail text at 128 characters. The app enforces a stricter 128 UTF-8-byte cap. The integration uses the local RPC/IPC protocol.
