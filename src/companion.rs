@@ -932,7 +932,13 @@ mod tests {
         ) {
             Ok(server) => Some(server),
             Err(ProtocolError::Io(io::ErrorKind::PermissionDenied)) => {
-                eprintln!("skipping loopback test: sandbox denies local TCP sockets");
+                const REQUIRE_LOOPBACK: &str = "XERUST_REQUIRE_LOOPBACK";
+                if std::env::var_os(REQUIRE_LOOPBACK).is_some() {
+                    panic!("required localhost TCP socket is unavailable (PermissionDenied)");
+                }
+                println!(
+                    "SKIPPED: localhost TCP socket unavailable (PermissionDenied); set {REQUIRE_LOOPBACK}=1 to make this a failure"
+                );
                 None
             }
             Err(error) => panic!("could not bind test listener: {error:?}"),

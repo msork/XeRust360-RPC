@@ -24,5 +24,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libx11-dev libxkbcommon-x11-dev libegl1-mesa-dev libglib2.0-dev libdbus-1-dev pkg-config
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
+      - name: Run localhost companion TCP integration tests
+        env:
+          XERUST_REQUIRE_LOOPBACK: "1"
+        run: |
+          cargo test --workspace companion::tests::loopback_mock_peer_drives_authenticated_session_and_disconnect -- --nocapture
+          cargo test --workspace companion::tests::authenticated_peer_with_invalid_message_is_rejected_and_disconnected -- --nocapture
+          cargo test --workspace companion::tests::idle_companion_expires_and_invalid_key_is_rejected -- --nocapture
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo check --workspace
