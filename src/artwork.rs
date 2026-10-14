@@ -30,6 +30,43 @@ struct HttpResponse {
     content_type: String,
     redirects: u32,
     final_url: String,
+    transfer_ok: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtworkHttpCheck {
+    pub status: u16,
+    pub content_type: String,
+    pub redirects: u32,
+    pub final_url: String,
+    pub bytes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtworkCoverCheck {
+    pub http: Option<ArtworkHttpCheck>,
+    pub validation: String,
+    pub cache: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtworkProviderCheck {
+    pub provider: String,
+    pub metadata: String,
+    pub metadata_http: Option<ArtworkHttpCheck>,
+    pub title: Option<String>,
+    pub cover_url: Option<String>,
+    pub cover: Option<ArtworkCoverCheck>,
+    metadata_result: Option<GameMetadata>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtworkLiveCheck {
+    pub title_id: String,
+    pub providers: Vec<ArtworkProviderCheck>,
+    pub metadata_cache_before: String,
+    pub metadata_cache_after: String,
+    pub selected: Option<GameMetadata>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,10 +135,7 @@ impl ArtworkResolver {
     }
 
     pub fn system_default() -> Self {
-        let cache_dir = crate::settings::settings_path()
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("artwork");
+        let cache_dir = system_cache_dir();
         Self::new(
             cache_dir,
             vec![
@@ -267,6 +301,287 @@ impl ArtworkResolver {
     }
 }
 
+pub fn system_cache_dir() -> PathBuf {
+    crate::settings::settings_path()
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("artwork")
+}
+
+/// Performs explicit live checks against both built-in metadata providers and
+/// validates each returned image before writing a diagnostic cache entry.
+/// This never falls back to mock metadata.
+pub fn live_diagnostic(title_id: &str, cache_dir: &Path) -> Result<ArtworkLiveCheck, ArtworkError> {
+    let normalized =
+        crate::catalog::normalize_title_id(title_id).ok_or(ArtworkError::InvalidTitleId)?;
+    let metadata_path = cache_dir.join(format!("{normalized}.json"));
+    let metadata_cache_before = if read_cache(&metadata_path).is_ok() {
+        "hit (existing metadata cache entry)".to_owned()
+    } else {
+        "miss".to_owned()
+    };
+    let diagnostic_dir = cache_dir.join("diagnostics");
+    let mut providers = vec![probe_x360db(&normalized), probe_xboxunity(&normalized)];
+
+    for (index, result) in providers.iter_mut().enumerate() {
+        let Some(metadata) = result.metadata_result.clone() else {
+            continue;
+        };
+        let Some(url) = metadata.cover_url.as_deref() else {
+            result.cover = Some(ArtworkCoverCheck {
+                http: None,
+                validation: "provider returned no usable cover URL".to_owned(),
+                cache: "not written".to_owned(),
+            });
+            continue;
+        };
+        match curl_image(url) {
+            Ok(response) => {
+                let http = Some(http_check(&response));
+                if let Some(reason) = cover_response_error(&response) {
+                    result.cover = Some(ArtworkCoverCheck {
+                        http,
+                        validation: format!("failed: {reason}"),
+                        cache: "not written".to_owned(),
+                    });
+                    continue;
+                }
+                let key = format!(
+                    "{}-{}",
+                    normalized,
+                    if index == 0 { "x360db" } else { "xboxunity" }
+                );
+                match cache_cover_bytes(&response.body, &diagnostic_dir, &key) {
+                    Ok(path) => {
+                        let cache_ok = fs::read(path).is_ok_and(|cached| cached == response.body);
+                        result.cover = Some(ArtworkCoverCheck {
+                            http,
+                            validation: "passed: HTTPS, MIME, size, and image signature".to_owned(),
+                            cache: if cache_ok {
+                                "write and readback passed".to_owned()
+                            } else {
+                                "write/readback failed".to_owned()
+                            },
+                        });
+                    }
+                    Err(error) => {
+                        result.cover = Some(ArtworkCoverCheck {
+                            http,
+                            validation: "passed: HTTPS, MIME, size, and image signature".to_owned(),
+                            cache: if error.kind() == io::ErrorKind::PermissionDenied {
+                                "write failed: permission denied".to_owned()
+                            } else {
+                                "write failed".to_owned()
+                            },
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                result.cover = Some(ArtworkCoverCheck {
+                    http: None,
+                    validation: format!("failed: {error}"),
+                    cache: "not written".to_owned(),
+                });
+            }
+        }
+    }
+
+    let mut selected: Option<GameMetadata> = None;
+    for provider in &providers {
+        let Some(metadata) = &provider.metadata_result else {
+            continue;
+        };
+        if provider
+            .cover
+            .as_ref()
+            .is_none_or(|cover| !cover.cache.starts_with("write and readback passed"))
+        {
+            continue;
+        }
+        match selected.as_mut() {
+            None => selected = Some(metadata.clone()),
+            Some(existing) => {
+                if existing.name.is_none() {
+                    existing.name = metadata.name.clone();
+                }
+                if metadata.official_cover == Some(true) && existing.official_cover != Some(true) {
+                    let name = existing.name.clone().or_else(|| metadata.name.clone());
+                    *existing = metadata.clone();
+                    existing.name = name;
+                }
+            }
+        }
+    }
+    if let Some(title) = providers
+        .iter()
+        .filter_map(|provider| provider.metadata_result.as_ref())
+        .find_map(|metadata| metadata.name.clone())
+        && let Some(selected) = selected.as_mut()
+    {
+        selected.name = Some(title);
+    }
+
+    let metadata_cache_after = if let Some(mut metadata) = selected.clone() {
+        let source_cover = providers
+            .iter()
+            .find(|provider| {
+                provider
+                    .metadata_result
+                    .as_ref()
+                    .is_some_and(|candidate| candidate.source == metadata.source)
+                    && provider
+                        .cover
+                        .as_ref()
+                        .is_some_and(|cover| cover.cache.starts_with("write and readback passed"))
+            })
+            .and_then(|provider| {
+                let key = if provider.provider == "x360db" {
+                    "x360db"
+                } else {
+                    "xboxunity"
+                };
+                fs::read(diagnostic_dir.join(format!("{normalized}-{key}.cover"))).ok()
+            });
+        if let Some(bytes) = source_cover
+            && let Ok(path) = cache_cover_bytes(&bytes, cache_dir, &normalized)
+        {
+            metadata.cached_cover_path = Some(path);
+        }
+        let entry = CacheEntry {
+            checked_at: unix_now(),
+            metadata: Some(metadata.clone()),
+        };
+        if write_cache(&metadata_path, &entry).is_ok()
+            && read_cache(&metadata_path)
+                .is_ok_and(|cached| cached.metadata.as_ref() == Some(&metadata))
+        {
+            "write and readback passed".to_owned()
+        } else {
+            "write/readback failed".to_owned()
+        }
+    } else {
+        "not written: no exact title with a validated cover".to_owned()
+    };
+
+    Ok(ArtworkLiveCheck {
+        title_id: normalized,
+        providers,
+        metadata_cache_before,
+        metadata_cache_after,
+        selected,
+    })
+}
+
+fn probe_x360db(title_id: &str) -> ArtworkProviderCheck {
+    let provider = "x360db";
+    let response = curl_get(
+        "https://xenia-manager.github.io/x360db/games.json",
+        MAX_METADATA_BYTES,
+    );
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            return provider_check(provider, &format!("failed: {error}"), None, None);
+        }
+    };
+    let Some(response) = response else {
+        return provider_check(provider, "HTTP not found", None, None);
+    };
+    let http = http_check(&response);
+    if let Some(reason) = metadata_response_error(&response) {
+        return provider_check(
+            provider,
+            &format!("failed: HTTP {}; {reason}", response.status),
+            Some(http),
+            None,
+        );
+    }
+    let entries: Vec<X360DbEntry> = match serde_json::from_slice(&response.body) {
+        Ok(entries) => entries,
+        Err(_) => {
+            return provider_check(provider, "failed: invalid JSON response", Some(http), None);
+        }
+    };
+    let metadata = find_x360db_title(&entries, title_id).map(|mut metadata| {
+        metadata.title_id = title_id.to_owned();
+        metadata
+    });
+    let status = if metadata.is_some() {
+        "HTTP 200; exact Title ID matched"
+    } else {
+        "HTTP 200; no exact Title ID match"
+    };
+    provider_check(provider, status, Some(http), metadata)
+}
+
+fn probe_xboxunity(title_id: &str) -> ArtworkProviderCheck {
+    let provider = "XboxUnity";
+    let endpoint = format!("https://xboxunity.net/Resources/Lib/CoverInfo.php?titleid={title_id}");
+    let response = match curl_get(&endpoint, MAX_METADATA_BYTES) {
+        Ok(response) => response,
+        Err(error) => {
+            return provider_check(provider, &format!("failed: {error}"), None, None);
+        }
+    };
+    let Some(response) = response else {
+        return provider_check(provider, "HTTP not found", None, None);
+    };
+    let http = http_check(&response);
+    if let Some(reason) = metadata_response_error(&response) {
+        return provider_check(
+            provider,
+            &format!("failed: HTTP {}; {reason}", response.status),
+            Some(http),
+            None,
+        );
+    }
+    let metadata = match parse_xboxunity_covers(&response.body, title_id) {
+        Ok(metadata) => metadata,
+        Err(_) => {
+            return provider_check(
+                provider,
+                "failed: invalid cover metadata JSON",
+                Some(http),
+                None,
+            );
+        }
+    };
+    let status = if metadata.is_some() {
+        "HTTP 200; cover metadata matched exact Title ID"
+    } else {
+        "HTTP 200; no cover metadata for exact Title ID"
+    };
+    provider_check(provider, status, Some(http), metadata)
+}
+
+fn provider_check(
+    provider: &str,
+    metadata_status: &str,
+    metadata_http: Option<ArtworkHttpCheck>,
+    metadata: Option<GameMetadata>,
+) -> ArtworkProviderCheck {
+    ArtworkProviderCheck {
+        provider: provider.to_owned(),
+        metadata: metadata_status.to_owned(),
+        metadata_http,
+        title: metadata.as_ref().and_then(|game| game.name.clone()),
+        cover_url: metadata.as_ref().and_then(|game| game.cover_url.clone()),
+        cover: None,
+        metadata_result: metadata,
+    }
+}
+
+fn http_check(response: &HttpResponse) -> ArtworkHttpCheck {
+    ArtworkHttpCheck {
+        status: response.status,
+        content_type: response.content_type.clone(),
+        redirects: response.redirects,
+        final_url: response.final_url.clone(),
+        bytes: response.body.len(),
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct CacheEntry {
     checked_at: u64,
@@ -392,8 +707,11 @@ impl MetadataProvider for X360DbProvider {
                 else {
                     return Ok(None);
                 };
-                if !is_json_content_type(&response.content_type) {
-                    return Err(ArtworkError::Provider(self.name().to_owned()));
+                if response.status == 404 || response.status == 410 {
+                    return Ok(None);
+                }
+                if let Some(reason) = metadata_response_error(&response) {
+                    return Err(ArtworkError::Provider(format!("{}: {reason}", self.name())));
                 }
                 let parsed: Vec<X360DbEntry> = serde_json::from_slice(&response.body)
                     .map_err(|_| ArtworkError::Provider(self.name().to_owned()))?;
@@ -434,8 +752,11 @@ impl MetadataProvider for XboxUnityProvider {
         let Some(response) = curl_get(&endpoint, MAX_METADATA_BYTES)? else {
             return Ok(None);
         };
-        if !is_json_content_type(&response.content_type) {
-            return Err(ArtworkError::Provider(self.name().to_owned()));
+        if response.status == 404 || response.status == 410 {
+            return Ok(None);
+        }
+        if let Some(reason) = metadata_response_error(&response) {
+            return Err(ArtworkError::Provider(format!("{}: {reason}", self.name())));
         }
         parse_xboxunity_covers(&response.body, title_id)
     }
@@ -493,7 +814,7 @@ fn curl_get(url: &str, max_bytes: usize) -> Result<Option<HttpResponse>, Artwork
         ])
         .output()
         .map_err(|_| ArtworkError::Provider("curl is unavailable".to_owned()))?;
-    let Some(response) = parse_curl_response(&output.stdout) else {
+    let Some(mut response) = parse_curl_response(&output.stdout) else {
         if output.status.code() == Some(63) {
             return Err(ArtworkError::Provider(
                 "response exceeded configured size limit".to_owned(),
@@ -503,20 +824,23 @@ fn curl_get(url: &str, max_bytes: usize) -> Result<Option<HttpResponse>, Artwork
             "HTTPS response metadata was unavailable".to_owned(),
         ));
     };
-    if response.status == 404 || response.status == 410 {
-        return Ok(None);
-    }
-    if !output.status.success()
-        || response.status != 200
-        || response.redirects > MAX_REDIRECTS
-        || response.body.len() > max_bytes
-        || !valid_discord_image_url(&response.final_url)
-    {
+    response.transfer_ok = output.status.success();
+    if output.status.code() == Some(63) || response.body.len() > max_bytes {
         return Err(ArtworkError::Provider(
-            "HTTPS request failed or response exceeded limit".to_owned(),
+            "HTTPS response exceeded configured size limit".to_owned(),
         ));
     }
-    Ok(Some(response))
+    if response.status != 0 {
+        return Ok(Some(response));
+    }
+    if !output.status.success() || response.status == 0 {
+        return Err(ArtworkError::Provider(
+            "HTTPS DNS/network request failed".to_owned(),
+        ));
+    }
+    Err(ArtworkError::Provider(
+        "HTTPS request returned no HTTP response".to_owned(),
+    ))
 }
 
 fn parse_curl_response(output: &[u8]) -> Option<HttpResponse> {
@@ -537,6 +861,7 @@ fn parse_curl_response(output: &[u8]) -> Option<HttpResponse> {
         content_type,
         redirects,
         final_url,
+        transfer_ok: false,
     })
 }
 
@@ -550,6 +875,28 @@ fn is_json_content_type(content_type: &str) -> bool {
     media_type == "application/json" || media_type == "text/json" || media_type.ends_with("+json")
 }
 
+fn metadata_response_error(response: &HttpResponse) -> Option<&'static str> {
+    if !response.transfer_ok {
+        return Some("network transfer failed");
+    }
+    if response.status != 200 {
+        return Some("HTTP status was not 200");
+    }
+    if response.redirects > MAX_REDIRECTS {
+        return Some("redirect limit exceeded");
+    }
+    if !valid_discord_image_url(&response.final_url) {
+        return Some("final URL is not an allowed public HTTPS URL");
+    }
+    if response.body.len() > MAX_METADATA_BYTES {
+        return Some("metadata exceeded size limit");
+    }
+    if !is_json_content_type(&response.content_type) {
+        return Some("response is not JSON MIME");
+    }
+    None
+}
+
 fn is_supported_image_content_type(content_type: &str) -> bool {
     matches!(
         content_type.split(';').next().unwrap_or_default().trim(),
@@ -557,7 +904,7 @@ fn is_supported_image_content_type(content_type: &str) -> bool {
     )
 }
 
-fn fetch_and_cache_cover(url: &str, cache_dir: &Path, title_id: &str) -> io::Result<PathBuf> {
+fn curl_image(url: &str) -> io::Result<HttpResponse> {
     if !valid_discord_image_url(url) {
         return Err(io::Error::other("cover URL is not a valid HTTPS image URL"));
     }
@@ -582,21 +929,47 @@ fn fetch_and_cache_cover(url: &str, cache_dir: &Path, title_id: &str) -> io::Res
             url,
         ])
         .output()?;
-    let response = parse_curl_response(&output.stdout);
-    let Some(response) = response else {
+    let Some(mut response) = parse_curl_response(&output.stdout) else {
         return Err(io::Error::other("cover response metadata was unavailable"));
     };
-    if !output.status.success()
-        || response.status != 200
-        || response.redirects > MAX_REDIRECTS
-        || response.body.len() > MAX_IMAGE_BYTES
-        || !valid_discord_image_url(&response.final_url)
-        || !is_supported_image_content_type(&response.content_type)
-        || !is_supported_image(&response.body)
-    {
+    response.transfer_ok = output.status.success();
+    if output.status.code() == Some(63) || response.body.len() > MAX_IMAGE_BYTES {
         return Err(io::Error::other(
-            "cover download failed, exceeded size limit, or had unsupported content type/format",
+            "cover response exceeded configured size limit",
         ));
+    }
+    Ok(response)
+}
+
+fn cover_response_error(response: &HttpResponse) -> Option<&'static str> {
+    if !response.transfer_ok {
+        return Some("curl transfer failed");
+    }
+    if response.status != 200 {
+        return Some("HTTP status was not 200");
+    }
+    if response.redirects > MAX_REDIRECTS {
+        return Some("redirect limit exceeded");
+    }
+    if !valid_discord_image_url(&response.final_url) {
+        return Some("final URL is not an allowed public HTTPS URL");
+    }
+    if response.body.len() > MAX_IMAGE_BYTES {
+        return Some("image exceeded size limit");
+    }
+    if !is_supported_image_content_type(&response.content_type) {
+        return Some("unsupported image MIME type");
+    }
+    if !is_supported_image(&response.body) {
+        return Some("image signature did not match supported formats");
+    }
+    None
+}
+
+fn fetch_and_cache_cover(url: &str, cache_dir: &Path, title_id: &str) -> io::Result<PathBuf> {
+    let response = curl_image(url)?;
+    if let Some(reason) = cover_response_error(&response) {
+        return Err(io::Error::other(format!("cover download failed: {reason}")));
     }
     cache_cover_bytes(&response.body, cache_dir, title_id)
 }
@@ -774,6 +1147,53 @@ mod tests {
         assert!(is_json_content_type("application/vnd.example+json"));
         assert!(!is_json_content_type("text/html"));
         assert!(!is_supported_image_content_type("text/html"));
+    }
+
+    #[test]
+    fn metadata_and_cover_transport_checks_reject_bad_status_redirect_mime_and_signature() {
+        let valid = HttpResponse {
+            body: b"\x89PNG\r\n\x1a\n".to_vec(),
+            status: 200,
+            content_type: "image/png".to_owned(),
+            redirects: 1,
+            final_url: "https://cdn.example/game.png".to_owned(),
+            transfer_ok: true,
+        };
+        assert_eq!(cover_response_error(&valid), None);
+        let mut invalid = valid;
+        invalid.redirects = MAX_REDIRECTS + 1;
+        assert_eq!(
+            cover_response_error(&invalid),
+            Some("redirect limit exceeded")
+        );
+        invalid.redirects = 0;
+        invalid.content_type = "text/html".to_owned();
+        assert_eq!(
+            cover_response_error(&invalid),
+            Some("unsupported image MIME type")
+        );
+        invalid.content_type = "image/png".to_owned();
+        invalid.body = b"<html>not an image</html>".to_vec();
+        assert_eq!(
+            cover_response_error(&invalid),
+            Some("image signature did not match supported formats")
+        );
+
+        let metadata = HttpResponse {
+            body: b"[]".to_vec(),
+            status: 200,
+            content_type: "application/json".to_owned(),
+            redirects: 0,
+            final_url: "https://metadata.example/games.json".to_owned(),
+            transfer_ok: true,
+        };
+        assert_eq!(metadata_response_error(&metadata), None);
+        let mut bad_metadata = metadata;
+        bad_metadata.final_url = "http://metadata.example/games.json".to_owned();
+        assert_eq!(
+            metadata_response_error(&bad_metadata),
+            Some("final URL is not an allowed public HTTPS URL")
+        );
     }
 
     struct FixtureProvider {
