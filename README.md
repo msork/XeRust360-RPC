@@ -34,7 +34,7 @@ Create a Discord application named **Xbox 360** and use its Application ID in th
 
 Known Xbox 360 Title IDs resolve game names and box art through the x360db metadata index, with XboxUnity as a runtime artwork fallback. The cover image URL is passed directly through official Discord Rich Presence local IPC, so each game does not need an uploaded Discord asset. The local cache keeps metadata and downloaded art for the desktop preview when offline. Discord itself can only fetch a public provider URL; when one is unavailable the presence uses the generic asset. Unknown Title IDs stay unresolved; no title is guessed.
 
-The metadata providers are community resources. x360db documents about 6,000 Xbox 360 entries and per-title box-art URLs, but does not document a separate cover-art license. XboxUnity's cover API documents an official/community flag; its archive license excludes original cover images and does not establish permission for those images, API uptime, or hotlinking. XeRust360-RPC does not bundle or rehost cover art. Provider traffic includes the currently observed Title ID; no credentials or other telemetry are sent to these providers. You can keep the app offline to use locally cached metadata/artwork, or rely on the generic Discord asset. Provider availability and permission to hotlink are not verified from this environment.
+The metadata providers are community resources. x360db documents about 6,000 Xbox 360 entries, alternate IDs, media IDs, and per-title box-art URLs, but does not document a separate cover-art license. XboxUnity's cover API documents an official/community flag; its archive license excludes original cover images and does not establish permission for those images, API uptime, or hotlinking. XeRust360-RPC does not bundle or rehost cover art. Provider traffic includes the currently observed Title ID; no credentials or other telemetry are sent to these providers. You can keep the app offline to use locally cached metadata/artwork, or rely on the generic Discord asset. Title ID-only telemetry cannot select between discs sharing a Title ID. Original Xbox identification is not claimed unless a provider explicitly identifies the platform. Artwork diagnostics show title ID, match/provider, image URL, cache state, and fallback reason.
 
 Artwork lookup uses the system `curl` executable for bounded HTTPS requests (connect/total timeout and response-size caps). It is available by default on current Windows, macOS, and common Linux installations; if missing or blocked, title telemetry continues and a provider diagnostic is shown.
 
@@ -62,7 +62,7 @@ cargo test --workspace --offline
 cargo clippy --workspace --all-targets --offline -- -D warnings
 ```
 
-Cross-platform checks run in GitHub Actions for Ubuntu, Windows, and macOS. Unit/fixture tests verify direct external URL serialization into Discord `SET_ACTIVITY`; live third-party URL fetching/rendering remains unverified without a running Discord client. Native hardware and real Discord client checks remain manual; see [`specs/testing.md`](specs/testing.md).
+Cross-platform checks run in GitHub Actions for Ubuntu, Windows, and macOS. Unit/fixture tests verify external URL serialization into Discord `SET_ACTIVITY`; this environment has no Discord IPC socket and cannot resolve x360db or XboxUnity, so live provider fetches and visible Discord rendering remain unverified. Native hardware and real Discord client checks remain manual; see [`specs/testing.md`](specs/testing.md).
 
 ## License
 

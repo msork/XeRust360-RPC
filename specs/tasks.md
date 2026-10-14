@@ -82,6 +82,15 @@ Every milestone is committed separately after its acceptance checks. Update thes
 - [x] Update CI, README, compatibility notes, and asset setup guidance. Do not bundle third-party cover files.
 - Acceptance: real documented Title IDs resolve through provider fixtures; no unknown ID is assigned a game; actual remote artwork is represented by an HTTPS URL; Discord rendering is described as protocol-supported but not live-verified without a client check.
 
+## M10 — Artwork end-to-end validation and diagnostics
+
+- [ ] Add diagnostics for observed Title ID, exact resolved title, provider, public image URL, cache status, and fallback reason; never expose credentials or raw provider bodies.
+- [ ] Add controlled tests for redirects, content type/image signature, cache reuse, rate limits, and provider outages.
+- [ ] Run opt-in live x360db and XboxUnity checks for representative disc, XBLA, obscure, and multi-disc records; document Original Xbox coverage only when provider metadata explicitly labels it.
+- [ ] Record actual HTTP/DNS outcomes, exact matching, and cache results; blocked network is not a passing provider result.
+- [ ] Verify external HTTPS artwork with official local IPC and a running Discord desktop client; confirm visible image rendering. IPC payload acceptance alone is insufficient.
+- Acceptance: fixture/controlled cases pass, and live provider/client checks are separately evidenced or explicitly blocked. No identity, artwork availability, or rendering success is guessed.
+
 ## Milestone test cases
 
 | ID | Case | Expected result |
