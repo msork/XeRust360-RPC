@@ -859,6 +859,26 @@ mod tests {
             session.verify_next(&key, &challenge, &frame),
             Err(ProtocolError::WrongVersion)
         );
+        let auth = encode_authentication(&key, &challenge);
+        let unknown = std::str::from_utf8(&auth)
+            .unwrap()
+            .replace("\"mac\":", "\"extra\":0,\"mac\":");
+        assert_eq!(
+            verify_authentication(&key, &challenge, unknown.as_bytes()),
+            Err(ProtocolError::InvalidJson)
+        );
+        let spaced = std::str::from_utf8(&auth).unwrap().replace(',', ", ");
+        assert_eq!(
+            verify_authentication(&key, &challenge, spaced.as_bytes()),
+            Err(ProtocolError::NonCanonicalJson)
+        );
+        let duplicate = std::str::from_utf8(&auth)
+            .unwrap()
+            .replace("\"version\":1,", "\"version\":1,\"version\":1,");
+        assert_eq!(
+            verify_authentication(&key, &challenge, duplicate.as_bytes()),
+            Err(ProtocolError::InvalidJson)
+        );
         assert!(
             CompanionTelemetry {
                 title_id: Some("not-a-title".to_owned()),
@@ -978,5 +998,14 @@ mod tests {
     fn listener_refuses_non_private_bind_addresses() {
         let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 4), 0));
         assert!(CompanionServer::bind(address, key(), Duration::from_secs(1)).is_err());
+    }
+
+    #[test]
+    fn shared_keys_require_exact_256_bit_hex_and_redact_debug() {
+        let key = SharedKey::from_hex(&"ab".repeat(32)).unwrap();
+        assert_eq!(key.to_hex(), "ab".repeat(32));
+        assert!(SharedKey::from_hex("ab").is_err());
+        assert!(SharedKey::from_hex(&"zz".repeat(32)).is_err());
+        assert_eq!(format!("{key:?}"), "SharedKey([REDACTED])");
     }
 }
