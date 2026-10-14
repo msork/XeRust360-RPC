@@ -538,7 +538,11 @@ fn parse_title(value: &Value) -> GameIdentity {
     let name = field(value, &["title_name", "gametitle", "name"])
         .and_then(value_to_string)
         .filter(|s| !s.trim().is_empty());
-    GameIdentity { title_id, name }
+    GameIdentity {
+        title_id,
+        name,
+        ..Default::default()
+    }
 }
 
 fn parse_profile(value: &Value) -> (Option<String>, Option<u32>, Option<usize>) {

@@ -3,9 +3,13 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GameIdentity {
     pub title_id: Option<String>,
     pub name: Option<String>,
+    pub cover_url: Option<String>,
+    pub artwork_source: Option<String>,
+    pub cached_cover_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

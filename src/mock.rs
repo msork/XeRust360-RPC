@@ -8,6 +8,7 @@ pub fn sample_snapshot() -> TelemetrySnapshot {
         game: GameIdentity {
             title_id: Some("4D5307E6".to_owned()),
             name: Some("Halo 3".to_owned()),
+            ..Default::default()
         },
         gamertag: Some("MockPlayer".to_owned()),
         achievements: AchievementProgress {

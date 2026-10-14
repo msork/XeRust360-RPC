@@ -275,8 +275,21 @@ mod tests {
         assert_eq!(activity["type"], 0);
         assert_eq!(activity["details"], "Halo 3");
         assert_eq!(activity["state"], presence.state);
-        assert_eq!(activity["assets"]["large_image"], "halo-3");
+        assert_eq!(activity["assets"]["large_image"], "xbox-360-placeholder");
         assert!(activity["timestamps"]["start"].as_u64().is_some());
+    }
+
+    #[test]
+    fn serializes_external_cover_url_in_local_rpc_activity() {
+        let mut snapshot = sample_snapshot();
+        snapshot.game.cover_url = Some("https://art.example/halo3.jpg".to_owned());
+        let presence = format_presence(&snapshot, StateToggles::default(), None).unwrap();
+        let activity = activity_object(&presence);
+        assert_eq!(
+            activity["assets"]["large_image"],
+            "https://art.example/halo3.jpg"
+        );
+        assert_eq!(activity["assets"]["small_image"], "xerust360-rpc");
     }
 
     #[test]

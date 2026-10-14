@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::{
+    artwork::{ArtworkError, ArtworkResolver, GameMetadata},
     companion::{CompanionEvent, CompanionServer, SharedKey},
     discord::{DiscordError, DiscordRpcClient},
     domain::{GameSession, StateToggles, TelemetrySnapshot},
@@ -66,7 +67,7 @@ pub enum WorkerCommand {
 #[derive(Clone, Debug)]
 pub enum WorkerEvent {
     Snapshot {
-        snapshot: TelemetrySnapshot,
+        snapshot: Box<TelemetrySnapshot>,
         elapsed: Option<Duration>,
         connection: String,
         discord: String,
@@ -122,6 +123,9 @@ struct State {
     failures: u32,
     next_poll: Instant,
     companion_server: Option<CompanionServer>,
+    artwork_requests: Sender<String>,
+    requested_artwork_title: Option<String>,
+    latest_snapshot: Option<TelemetrySnapshot>,
 }
 
 fn run_worker(
@@ -129,6 +133,21 @@ fn run_worker(
     events: Sender<WorkerEvent>,
     settings: WorkerSettings,
 ) {
+    let (artwork_request_tx, artwork_request_rx) = mpsc::channel::<String>();
+    let (artwork_result_tx, artwork_result_rx) =
+        mpsc::channel::<(String, Result<Option<GameMetadata>, ArtworkError>)>();
+    let artwork_thread = thread::Builder::new()
+        .name("xerust360-artwork".to_owned())
+        .spawn(move || {
+            let resolver = ArtworkResolver::system_default();
+            while let Ok(title_id) = artwork_request_rx.recv() {
+                let result = resolver.resolve(&title_id);
+                if artwork_result_tx.send((title_id, result)).is_err() {
+                    break;
+                }
+            }
+        })
+        .expect("failed to start artwork worker");
     let mut state = State {
         settings,
         config: None,
@@ -143,6 +162,9 @@ fn run_worker(
         failures: 0,
         next_poll: Instant::now(),
         companion_server: None,
+        artwork_requests: artwork_request_tx,
+        requested_artwork_title: None,
+        latest_snapshot: None,
     };
     loop {
         let timeout = state
@@ -159,10 +181,13 @@ fn run_worker(
             poll_once(&mut state, &events);
         }
         process_companion_events(&mut state, &events);
+        process_artwork_results(&mut state, &artwork_result_rx, &events);
     }
     if let Some(discord) = state.discord.as_mut() {
         let _ = discord.clear_presence();
     }
+    drop(state.artwork_requests);
+    let _ = artwork_thread.join();
 }
 
 fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<WorkerEvent>) {
@@ -257,7 +282,7 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
             state.connection = "Companion listener stopped".to_owned();
             state.diagnostic.clear();
             let _ = events.send(WorkerEvent::Snapshot {
-                snapshot: TelemetrySnapshot::default(),
+                snapshot: Box::new(TelemetrySnapshot::default()),
                 elapsed: None,
                 connection: state.connection.clone(),
                 discord: state.discord_status.clone(),
@@ -275,7 +300,7 @@ fn handle_command(command: WorkerCommand, state: &mut State, events: &Sender<Wor
             state.clear_presence();
             state.session.observe_title(None, Instant::now());
             let _ = events.send(WorkerEvent::Snapshot {
-                snapshot: TelemetrySnapshot::default(),
+                snapshot: Box::new(TelemetrySnapshot::default()),
                 elapsed: None,
                 connection: state.connection.clone(),
                 discord: state.discord_status.clone(),
@@ -310,7 +335,7 @@ fn poll_once(state: &mut State, events: &Sender<WorkerEvent>) {
         state.diagnostic = "Synthetic values are labeled as mock data".to_owned();
         let _ = events.send(WorkerEvent::Snapshot {
             elapsed: state.session.elapsed(Instant::now()),
-            snapshot,
+            snapshot: Box::new(snapshot),
             connection: state.connection.clone(),
             discord: state.discord_status.clone(),
             diagnostic: state.diagnostic.clone(),
@@ -324,22 +349,14 @@ fn poll_once(state: &mut State, events: &Sender<WorkerEvent>) {
     };
     match client.poll() {
         Ok(result) => {
-            let mut snapshot = result.snapshot;
-            if snapshot.game.name.is_none() {
-                snapshot.game.name = snapshot
-                    .game
-                    .title_id
-                    .as_deref()
-                    .and_then(crate::catalog::resolve_title_name)
-                    .map(str::to_owned);
-            }
+            let snapshot = result.snapshot;
             update_and_publish(state, snapshot.clone());
             state.failures = 0;
             state.connection = "Connected to Aurora / NOVA".to_owned();
             state.diagnostic = diagnostics_text(&result.diagnostics);
             let elapsed = state.session.elapsed(Instant::now());
             let _ = events.send(WorkerEvent::Snapshot {
-                snapshot,
+                snapshot: Box::new(snapshot),
                 elapsed,
                 connection: state.connection.clone(),
                 discord: state.discord_status.clone(),
@@ -348,6 +365,8 @@ fn poll_once(state: &mut State, events: &Sender<WorkerEvent>) {
             state.next_poll = Instant::now() + state.settings.poll_interval;
         }
         Err(error) => {
+            state.latest_snapshot = None;
+            state.requested_artwork_title = None;
             state.failures = state.failures.saturating_add(1);
             state.connection = if state.settings.auto_reconnect {
                 format!("Reconnecting (attempt {})", state.failures)
@@ -383,33 +402,26 @@ fn process_companion_events(state: &mut State, events: &Sender<WorkerEvent>) {
                 send_status(state, events);
             }
             CompanionEvent::Snapshot { snapshot, .. } => {
-                let mut snapshot = snapshot;
-                if snapshot.game.name.is_none() {
-                    snapshot.game.name = snapshot
-                        .game
-                        .title_id
-                        .as_deref()
-                        .and_then(crate::catalog::resolve_title_name)
-                        .map(str::to_owned);
-                }
                 update_and_publish(state, snapshot.clone());
                 state.connection = "Peer Pressure title companion active".to_owned();
                 state.diagnostic = "Values are reported by the current title DLL; unsupported fields remain unavailable".to_owned();
                 let _ = events.send(WorkerEvent::Snapshot {
                     elapsed: state.session.elapsed(Instant::now()),
-                    snapshot,
+                    snapshot: Box::new(snapshot),
                     connection: state.connection.clone(),
                     discord: state.discord_status.clone(),
                     diagnostic: state.diagnostic.clone(),
                 });
             }
             CompanionEvent::Disconnected(reason) => {
+                state.latest_snapshot = None;
+                state.requested_artwork_title = None;
                 state.clear_presence();
                 state.session.observe_title(None, Instant::now());
                 state.connection = "Peer Pressure title companion unavailable".to_owned();
                 state.diagnostic = reason.to_owned();
                 let _ = events.send(WorkerEvent::Snapshot {
-                    snapshot: TelemetrySnapshot::default(),
+                    snapshot: Box::new(TelemetrySnapshot::default()),
                     elapsed: None,
                     connection: state.connection.clone(),
                     discord: state.discord_status.clone(),
@@ -436,6 +448,14 @@ impl State {
 }
 
 fn update_and_publish(state: &mut State, snapshot: TelemetrySnapshot) {
+    if !state.settings.mock_mode
+        && let Some(title_id) = snapshot.game.title_id.as_deref()
+        && state.requested_artwork_title.as_deref() != Some(title_id)
+    {
+        state.requested_artwork_title = Some(title_id.to_owned());
+        let _ = state.artwork_requests.send(title_id.to_owned());
+    }
+    state.latest_snapshot = Some(snapshot.clone());
     let title_key = snapshot
         .game
         .title_id
@@ -448,6 +468,45 @@ fn update_and_publish(state: &mut State, snapshot: TelemetrySnapshot) {
         state.session.elapsed(Instant::now()),
     );
     publish(state, presence.as_ref());
+}
+
+fn process_artwork_results(
+    state: &mut State,
+    results: &Receiver<(String, Result<Option<GameMetadata>, ArtworkError>)>,
+    events: &Sender<WorkerEvent>,
+) {
+    while let Ok((title_id, result)) = results.try_recv() {
+        let Some(snapshot) = state.latest_snapshot.as_mut() else {
+            continue;
+        };
+        if snapshot.game.title_id.as_deref() != Some(title_id.as_str()) {
+            continue;
+        }
+        match result {
+            Ok(Some(metadata)) => {
+                if snapshot.game.name.is_none() {
+                    snapshot.game.name = metadata.name;
+                }
+                snapshot.game.cover_url = metadata.cover_url;
+                snapshot.game.artwork_source = Some(metadata.source);
+                snapshot.game.cached_cover_path = metadata.cached_cover_path;
+                let snapshot = snapshot.clone();
+                update_and_publish(state, snapshot.clone());
+                let _ = events.send(WorkerEvent::Snapshot {
+                    elapsed: state.session.elapsed(Instant::now()),
+                    snapshot: Box::new(snapshot),
+                    connection: state.connection.clone(),
+                    discord: state.discord_status.clone(),
+                    diagnostic: state.diagnostic.clone(),
+                });
+            }
+            Ok(None) => {}
+            Err(error) => {
+                state.diagnostic = format!("{} · {error}", state.diagnostic);
+                send_status(state, events);
+            }
+        }
+    }
 }
 
 fn publish(state: &mut State, presence: Option<&PresencePayload>) {

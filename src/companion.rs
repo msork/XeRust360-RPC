@@ -220,6 +220,7 @@ impl CompanionTelemetry {
             game: crate::domain::GameIdentity {
                 title_id: self.title_id,
                 name: None,
+                ..Default::default()
             },
             gamertag: self.gamertag,
             achievements: AchievementProgress {

@@ -99,6 +99,7 @@ pub struct DesktopApp {
     presence_paused: bool,
     discovery_results: Vec<IpAddr>,
     save_error: Option<String>,
+    artwork_texture: Option<(std::path::PathBuf, egui::TextureHandle)>,
     tray_rx: Receiver<TrayAction>,
     #[cfg(target_os = "linux")]
     tray_handle: Option<TrayHandle>,
@@ -153,6 +154,7 @@ impl DesktopApp {
             presence_paused: false,
             discovery_results: Vec::new(),
             save_error: None,
+            artwork_texture: None,
             tray_rx,
             #[cfg(target_os = "linux")]
             tray_handle,
@@ -291,7 +293,7 @@ impl DesktopApp {
                     discord,
                     diagnostic,
                 } => {
-                    self.snapshot = Some(snapshot);
+                    self.snapshot = Some(*snapshot);
                     self.elapsed = elapsed;
                     self.snapshot_received_at = Some(Instant::now());
                     self.connection_status = connection;
@@ -562,7 +564,7 @@ impl DesktopApp {
         changed
     }
 
-    fn render_preview(&self, ui: &mut egui::Ui) {
+    fn render_preview(&mut self, ui: &mut egui::Ui) {
         ui.heading("Live preview");
         let presence = self.snapshot.as_ref().and_then(|snapshot| {
             let elapsed = self.elapsed.map(|duration| {
@@ -574,9 +576,36 @@ impl DesktopApp {
             });
             format_presence(snapshot, self.settings.toggles, elapsed)
         });
+        let artwork_path = self
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.game.cached_cover_path.clone());
+        if let Some(path) = artwork_path
+            && self
+                .artwork_texture
+                .as_ref()
+                .is_none_or(|(cached_path, _)| cached_path != &path)
+            && let Ok(bytes) = std::fs::read(&path)
+            && let Ok(image) = image::load_from_memory(&bytes)
+        {
+            let image = image.to_rgba8();
+            let size = [image.width() as usize, image.height() as usize];
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+            let texture =
+                ui.ctx()
+                    .load_texture("game-cover-art", color_image, egui::TextureOptions::LINEAR);
+            self.artwork_texture = Some((path, texture));
+        }
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label("🎮");
+                if let Some((_, texture)) = &self.artwork_texture {
+                    ui.add(
+                        egui::Image::new((texture.id(), egui::vec2(80.0, 80.0)))
+                            .fit_to_exact_size(egui::vec2(80.0, 80.0)),
+                    );
+                } else {
+                    ui.label("🎮");
+                }
                 ui.vertical(|ui| {
                     ui.strong(format!("Playing {ACTIVITY_NAME}"));
                     if let Some(presence) = presence {
@@ -592,9 +621,25 @@ impl DesktopApp {
                     }
                 });
             });
-            ui.small(
-                "Large image: game artwork / generic placeholder · Small image: XeRust360-RPC icon",
-            );
+            if let Some(game) = self.snapshot.as_ref().map(|snapshot| &snapshot.game) {
+                match (&game.cover_url, &game.artwork_source) {
+                    (Some(_), Some(source)) => {
+                        ui.small(format!("Large image: cover URL from {source}"));
+                    }
+                    (Some(_), None) => {
+                        ui.small("Large image: external game cover");
+                    }
+                    (None, _) => {
+                        ui.small("Large image: generic Xbox 360 fallback");
+                    }
+                }
+                if game.cached_cover_path.is_some() {
+                    ui.small("Cover art is cached locally for offline preview");
+                }
+            } else {
+                ui.small("Large image: generic Xbox 360 fallback");
+            }
+            ui.small("Small image: XeRust360-RPC project icon");
         });
     }
 }

@@ -1,3 +1,4 @@
+pub mod artwork;
 pub mod catalog;
 pub mod companion;
 pub mod credentials;

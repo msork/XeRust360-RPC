@@ -75,9 +75,9 @@ pub fn format_presence(
         elapsed,
         large_image: snapshot
             .game
-            .title_id
+            .cover_url
             .as_deref()
-            .and_then(crate::catalog::resolve_artwork_key)
+            .filter(|url| crate::artwork::valid_discord_image_url(url))
             .unwrap_or("xbox-360-placeholder")
             .to_owned(),
         small_image: "xerust360-rpc".to_owned(),
@@ -114,7 +114,7 @@ mod tests {
         let presence = format_presence(&sample_snapshot(), StateToggles::default(), None).unwrap();
         assert_eq!(presence.name, "Xbox 360");
         assert_eq!(presence.details, "Halo 3");
-        assert_eq!(presence.large_image, "halo-3");
+        assert_eq!(presence.large_image, "xbox-360-placeholder");
         assert_eq!(
             presence.state,
             "MockPlayer // 12/49 achievements // 275 GS // 18250 GS // CPU 54°C // GPU 59°C"
@@ -127,6 +127,7 @@ mod tests {
             game: GameIdentity {
                 title_id: Some("FFFE07D1".to_owned()),
                 name: None,
+                ..Default::default()
             },
             ..TelemetrySnapshot::default()
         };
@@ -164,6 +165,18 @@ mod tests {
         assert!(
             format_presence(&TelemetrySnapshot::default(), StateToggles::default(), None).is_none()
         );
+    }
+
+    #[test]
+    fn external_https_cover_url_is_selected_and_invalid_url_uses_generic_asset() {
+        let mut snapshot = sample_snapshot();
+        snapshot.game.cover_url = Some("https://art.example/cover.jpg".to_owned());
+        let presence = format_presence(&snapshot, StateToggles::default(), None).unwrap();
+        assert_eq!(presence.large_image, "https://art.example/cover.jpg");
+
+        snapshot.game.cover_url = Some("http://art.example/cover.jpg".to_owned());
+        let presence = format_presence(&snapshot, StateToggles::default(), None).unwrap();
+        assert_eq!(presence.large_image, "xbox-360-placeholder");
     }
 }
 
