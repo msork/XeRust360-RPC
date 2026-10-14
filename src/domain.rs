@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 pub struct GameIdentity {
     pub title_id: Option<String>,
     pub name: Option<String>,
+    pub artwork_title: Option<String>,
     pub cover_url: Option<String>,
     pub artwork_source: Option<String>,
     pub cached_cover_path: Option<std::path::PathBuf>,
+    pub artwork_fallback_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

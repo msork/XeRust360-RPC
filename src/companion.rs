@@ -507,7 +507,7 @@ pub enum CompanionEvent {
     Connected,
     Snapshot {
         sequence: u64,
-        snapshot: TelemetrySnapshot,
+        snapshot: Box<TelemetrySnapshot>,
     },
     Disconnected(&'static str),
     Rejected(&'static str),
@@ -654,7 +654,10 @@ fn handle_connection(
                 Ok((sequence, snapshot)) => {
                     last_valid = Instant::now();
                     if events
-                        .send(CompanionEvent::Snapshot { sequence, snapshot })
+                        .send(CompanionEvent::Snapshot {
+                            sequence,
+                            snapshot: Box::new(snapshot),
+                        })
                         .is_err()
                     {
                         return Ok(());

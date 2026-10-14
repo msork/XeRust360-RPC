@@ -622,22 +622,41 @@ impl DesktopApp {
                 });
             });
             if let Some(game) = self.snapshot.as_ref().map(|snapshot| &snapshot.game) {
-                match (&game.cover_url, &game.artwork_source) {
-                    (Some(_), Some(source)) => {
-                        ui.small(format!("Large image: cover URL from {source}"));
+                ui.separator();
+                ui.strong("Artwork diagnostics");
+                ui.small(format!(
+                    "Title ID: {}",
+                    game.title_id.as_deref().unwrap_or("unavailable")
+                ));
+                ui.small(format!(
+                    "Resolved title: {}",
+                    game.artwork_title.as_deref().unwrap_or("unresolved")
+                ));
+                ui.small(format!(
+                    "Provider: {}",
+                    game.artwork_source.as_deref().unwrap_or("none")
+                ));
+                ui.small(format!(
+                    "Image URL: {}",
+                    game.cover_url
+                        .as_deref()
+                        .unwrap_or("none; using generic asset")
+                ));
+                ui.small(format!(
+                    "Cache: {}",
+                    if game.cached_cover_path.is_some() {
+                        "local image cached"
+                    } else if game.cover_url.is_some() {
+                        "image not cached locally"
+                    } else {
+                        "no cached image"
                     }
-                    (Some(_), None) => {
-                        ui.small("Large image: external game cover");
-                    }
-                    (None, _) => {
-                        ui.small("Large image: generic Xbox 360 fallback");
-                    }
-                }
-                if game.cached_cover_path.is_some() {
-                    ui.small("Cover art is cached locally for offline preview");
+                ));
+                if let Some(reason) = &game.artwork_fallback_reason {
+                    ui.small(format!("Fallback reason: {reason}"));
                 }
             } else {
-                ui.small("Large image: generic Xbox 360 fallback");
+                ui.small("Artwork diagnostics: no active Title ID; using generic Xbox 360 asset");
             }
             ui.small("Small image: XeRust360-RPC project icon");
         });

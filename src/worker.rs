@@ -404,12 +404,12 @@ fn process_companion_events(state: &mut State, events: &Sender<WorkerEvent>) {
                 send_status(state, events);
             }
             CompanionEvent::Snapshot { snapshot, .. } => {
-                update_and_publish(state, snapshot.clone());
+                update_and_publish(state, *snapshot.clone());
                 state.connection = "Peer Pressure title companion active".to_owned();
                 state.diagnostic = "Values are reported by the current title DLL; unsupported fields remain unavailable".to_owned();
                 let _ = events.send(WorkerEvent::Snapshot {
                     elapsed: state.session.elapsed(Instant::now()),
-                    snapshot: Box::new(snapshot),
+                    snapshot,
                     connection: state.connection.clone(),
                     discord: state.discord_status.clone(),
                     diagnostic: state.diagnostic.clone(),
@@ -508,8 +508,35 @@ fn process_artwork_results(
                     diagnostic: state.diagnostic.clone(),
                 });
             }
-            Ok(None) => {}
+            Ok(None) => {
+                let mut snapshot = snapshot.clone();
+                snapshot.game.artwork_title = None;
+                snapshot.game.cover_url = None;
+                snapshot.game.artwork_source = None;
+                snapshot.game.cached_cover_path = None;
+                snapshot.game.artwork_fallback_reason =
+                    Some("No exact provider metadata match".to_owned());
+                update_and_publish(state, snapshot.clone());
+                let _ = events.send(WorkerEvent::Snapshot {
+                    elapsed: state.session.elapsed(Instant::now()),
+                    snapshot: Box::new(snapshot),
+                    connection: state.connection.clone(),
+                    discord: state.discord_status.clone(),
+                    diagnostic: state.diagnostic.clone(),
+                });
+            }
             Err(error) => {
+                let mut snapshot = snapshot.clone();
+                snapshot.game.artwork_fallback_reason =
+                    Some("Artwork provider unavailable".to_owned());
+                update_and_publish(state, snapshot.clone());
+                let _ = events.send(WorkerEvent::Snapshot {
+                    elapsed: state.session.elapsed(Instant::now()),
+                    snapshot: Box::new(snapshot),
+                    connection: state.connection.clone(),
+                    discord: state.discord_status.clone(),
+                    diagnostic: state.diagnostic.clone(),
+                });
                 state.diagnostic = format!("{} · {error}", state.diagnostic);
                 send_status(state, events);
             }
@@ -524,9 +551,15 @@ fn apply_game_metadata(snapshot: &mut TelemetrySnapshot, metadata: &GameMetadata
     if snapshot.game.name.is_none() {
         snapshot.game.name = metadata.name.clone();
     }
+    snapshot.game.artwork_title = metadata.name.clone();
     snapshot.game.cover_url = metadata.cover_url.clone();
     snapshot.game.artwork_source = Some(metadata.source.clone());
     snapshot.game.cached_cover_path = metadata.cached_cover_path.clone();
+    snapshot.game.artwork_fallback_reason = if metadata.cover_url.is_none() {
+        Some("No usable external cover URL was available".to_owned())
+    } else {
+        None
+    };
 }
 
 fn publish(state: &mut State, presence: Option<&PresencePayload>) {
@@ -646,6 +679,8 @@ mod artwork_tests {
         };
         apply_game_metadata(&mut refreshed, &meta);
         assert_eq!(refreshed.game.name.as_deref(), Some("Halo 3"));
+        assert_eq!(refreshed.game.artwork_title.as_deref(), Some("Halo 3"));
+        assert!(refreshed.game.artwork_fallback_reason.is_none());
         assert_eq!(
             refreshed.game.cover_url.as_deref(),
             Some("https://art.example/halo3.jpg")
